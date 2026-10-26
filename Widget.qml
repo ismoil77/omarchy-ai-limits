@@ -7,13 +7,14 @@ import "Model.js" as Model
 import "Contrast.js" as Contrast
 import "Strings.js" as Strings
 
-// Claude limits. The bar holds the 5-hour window: a star in the pace colour,
-// a meter of the window used with a tick where an even pace would be by now,
-// the percent, and the time to reset. The popup lists every window the
-// account spends against — 5 hours, the week, model-scoped weeks — each with
-// a one-sentence verdict, its meter, reset, pace and forecast. Numbers come
-// from Anthropic's usage endpoint (limit.py), so every device on the account
-// counts.
+// AI usage limits: Claude, Codex and Gemini, whichever are set up on this
+// machine. The bar holds the selected AI's main window: its mark in the pace
+// colour, a meter of the window used with a tick where an even pace would be
+// by now, the percent, and the time to reset. The popup has a switch between
+// the AIs and lists every window the account spends against — 5 hours, a day,
+// the week, model-scoped windows — each with a one-sentence verdict, its meter,
+// reset, pace and forecast. Numbers come from each provider's own usage
+// endpoint (limit.py), so every device on the account counts.
 //
 //   green  - on or under pace, no sign of running out before the reset
 //   yellow - ahead of the even pace, or heading past 85% by the reset
@@ -24,13 +25,15 @@ import "Strings.js" as Strings
 // pushed to at least WCAG AA contrast on the popup background, and the
 // status is also a word and a shape (✓ ▲ ✕) in the popup, never colour alone.
 //
-//   left click  - open/close the popup
-//   right click - refresh now
-//   popup       - r refreshes, Esc closes, the wheel scrolls
+//   left click   - open/close the popup
+//   middle click - next AI
+//   right click  - refresh now
+//   popup        - r refreshes, d details, h/l or 1-3 switch AI, Esc closes,
+//                  the wheel scrolls
 Panel {
   id: root
-  moduleName: "ismoil.claude-limit"
-  ipcTarget: "ismoil.claude-limit"
+  moduleName: "ismoil.ai-limits"
+  ipcTarget: "ismoil.ai-limits"
   manageIpc: false
 
   readonly property int pollSeconds: Math.max(45, Number(setting("interval", 60)) || 60)
@@ -71,21 +74,29 @@ Panel {
   readonly property color popupDim: Qt.color(Contrast.ensure(Contrast.mix(String(Color.popups.text), popupBg, 0.22), popupBg, 4.5))
   readonly property color popupLine: Qt.color(Contrast.mix(String(Color.popups.text), popupBg, 0.45))
 
-  property var info: ({ ok: false, error: "", fetchedAt: 0, plan: "", windows: [] })
+  // What limit.py last printed: every AI found on this machine.
+  property var payload: ({ selected: "", providers: [] })
+  // The AI picked here before limit.py has confirmed it.
+  property string choice: ""
+  readonly property var providers: payload.providers
+  readonly property string selectedId: {
+    for (var i = 0; i < providers.length; i++) if (providers[i].id === choice) return choice
+    return payload.selected
+  }
+  readonly property var emptyInfo: ({ id: "claude", name: "Claude", tool: "Claude Code", cmd: "claude", ok: false, error: "", fetchedAt: 0, plan: "", windows: [] })
+  // The selected AI's record: everything below reads this.
+  readonly property var info: {
+    for (var i = 0; i < providers.length; i++) if (providers[i].id === selectedId) return providers[i]
+    return providers.length ? providers[0] : emptyInfo
+  }
+  function markOf(id) { return id === "codex" ? "◈" : id === "gemini" ? "✦" : "✻" }
+  readonly property string marks: markOf(info.id)
   property bool loaded: false
   property real now: Date.now() / 1000
   property var themePalette: ({})
 
-  readonly property var session: {
-    for (var i = 0; i < info.windows.length; i++)
-      if (info.windows[i].group === "session") return info.windows[i]
-    return { group: "session", model: "", util: 0, resetsAt: null, window: 18000, rate: null }
-  }
-  readonly property var weekly: {
-    for (var i = 0; i < info.windows.length; i++)
-      if (info.windows[i].group === "weekly" && !info.windows[i].model) return info.windows[i]
-    return null
-  }
+  // The window the bar shows: the 5-hour one where there is one, else the first.
+  readonly property var session: Model.mainWindow(info) || { key: "", group: "session", model: "", util: 0, resetsAt: null, window: 18000, rate: null }
   readonly property var sessionPace: Model.pace(session, now, info, cfg)
   readonly property bool stale: loaded && !info.ok
   // The 5-hour window owns the bar, but a weekly window that is about to
@@ -94,7 +105,7 @@ Panel {
     var best = null
     for (var i = 0; i < info.windows.length; i++) {
       var w = info.windows[i]
-      if (w.group !== "weekly") continue
+      if (w.group !== "weekly" || w.key === session.key) continue
       var p = Model.pace(w, now, info, cfg)
       var rank = p.level === "red" ? 2 : p.level === "yellow" ? 1 : 0
       if (rank === 0) continue
@@ -104,6 +115,7 @@ Panel {
     return best
   }
   property bool pendingForce: false
+  property string pendingSelect: ""
   // The popup shows what matters; the rest of the numbers sit behind "Details".
   property bool details: false
 
@@ -126,17 +138,21 @@ Panel {
     return themePalette[name] ? themePalette[name] : fallback
   }
 
-  readonly property string tooltip: Model.tooltip(info, loaded, now, cfg)
+  readonly property string tooltip: Model.tooltip(providers, loaded, now, cfg)
 
   // ---------------------------------------------------------------- data
   // A click while a scheduled run is in flight is kept, not dropped.
-  function refresh(force) {
+  function refresh(force, select) {
     if (proc.running) {
       if (force) pendingForce = true
+      if (select) pendingSelect = select
       return
     }
     var args = ["python3", "-I", script]
     if (force) args.push("--force")
+    if (select) args.push("--select", select)
+    var only = String(setting("providers", "all")).replace(/\s+/g, "")
+    if (only !== "" && only !== "all") args.push("--providers", only)
     // Off by default: renewing rewrites Claude Code's login file, so the user opts in.
     if (setting("renewLogin", false) === true) args.push("--renew")
     proc.command = args
@@ -147,14 +163,31 @@ Panel {
   function apply(text) {
     try {
       var next = JSON.parse(text)
-      if (next && Array.isArray(next.windows)) {
-        info = next
+      if (next && Array.isArray(next.providers)) {
+        payload = next
         loaded = true
       }
     } catch (e) {
-      console.warn("ismoil.claude-limit", "bad output", e)
+      console.warn("ismoil.ai-limits", "bad output", e)
     }
     now = Date.now() / 1000
+  }
+
+  // Pick an AI by id, or step through them (direction ±1). limit.py remembers it.
+  function select(id) {
+    for (var i = 0; i < providers.length; i++) {
+      if (providers[i].id !== id) continue
+      choice = id
+      refresh(false, id)
+      return
+    }
+  }
+
+  function step(direction) {
+    if (providers.length < 2) return
+    var at = 0
+    for (var i = 0; i < providers.length; i++) if (providers[i].id === selectedId) at = i
+    select(providers[(at + direction + providers.length) % providers.length].id)
   }
 
   function parseColors(text) {
@@ -168,21 +201,26 @@ Panel {
   onOpenedChanged: if (opened) { now = Date.now() / 1000; refresh(false) }
 
   IpcHandler {
-    target: "ismoil.claude-limit"
+    target: "ismoil.ai-limits"
 
     function open(): void { root.open() }
     function close(): void { root.close() }
     function toggle(): void { root.toggle() }
     function refresh(): void { root.refresh(true) }
+    function next(): void { root.step(1) }
+    function previous(): void { root.step(-1) }
+    function select(id: string): void { root.select(id) }
   }
 
   Process {
     id: proc
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: root.apply(text) }
     onRunningChanged: {
-      if (running || !root.pendingForce) return
+      if (running || (!root.pendingForce && root.pendingSelect === "")) return
+      var force = root.pendingForce, select = root.pendingSelect
       root.pendingForce = false
-      root.refresh(true)
+      root.pendingSelect = ""
+      root.refresh(force, select)
     }
   }
 
@@ -301,6 +339,7 @@ Panel {
     tooltipText: root.opened ? "" : root.tooltip
     onPressed: function(b) {
       if (b === Qt.RightButton) root.refresh(true)
+      else if (b === Qt.MiddleButton) root.step(1)
       else root.toggle()
     }
 
@@ -315,7 +354,7 @@ Panel {
       opacity: root.stale ? 0.55 : 1
 
       Text {
-        text: "✻"
+        text: root.marks
         color: root.levelColor(root.sessionPace.level, root.barForeground)
         font.family: root.fontFamily
         font.pixelSize: Math.round(root.fsBar * 1.35)
@@ -349,7 +388,7 @@ Panel {
 
       Text {
         visible: !root.vertical
-        text: root.sessionPace.open ? Model.duration(root.sessionPace.leftHours, root.cfg, true) : Strings.t(root.cfg.lang, "barClosed")
+        text: Model.barTime(root.sessionPace, root.session, root.cfg)
         color: Util.alpha(root.barForeground, 0.8)
         font.family: root.fontFamily
         font.pixelSize: root.fsBar
@@ -370,7 +409,7 @@ Panel {
           id: chipText
           anchors.centerIn: parent
           text: root.alert
-            ? (root.alert.w.model ? root.alert.w.model.charAt(0) : Strings.t(root.cfg.lang, "weekShort")) + Math.round(root.alert.p.util) + "%"
+            ? Model.shortName(root.alert.w, root.cfg) + Math.round(root.alert.p.util) + "%"
             : ""
           color: root.barForeground
           font.family: root.fontFamily
@@ -402,6 +441,9 @@ Panel {
       onTextKey: function(t) {
         if (t === "r") root.refresh(true)
         else if (t === "d") root.details = !root.details
+        else if (t === "l") root.step(1)
+        else if (t === "h") root.step(-1)
+        else if (t >= "1" && t <= "9" && Number(t) <= root.providers.length) root.select(root.providers[Number(t) - 1].id)
       }
 
       // Large text can outgrow the screen: the card scrolls instead of clipping.
@@ -432,7 +474,7 @@ Panel {
 
             Text {
               id: heroIcon
-              text: "✻"
+              text: root.marks
               color: root.levelFill(root.sessionPace.level)
               font.family: root.fontFamily
               font.pixelSize: root.fsHero
@@ -450,7 +492,7 @@ Panel {
               spacing: Style.space(2)
 
               Text {
-                text: "Claude"
+                text: root.info.name
                 color: root.popupText
                 font.family: root.fontFamily
                 font.pixelSize: root.fsBig
@@ -480,6 +522,67 @@ Panel {
               fontSize: root.fsText
               verticalPadding: Style.space(4)
               onClicked: root.refresh(true)
+            }
+          }
+
+          // ---------- Which AI: a chip each, only when there is a choice ----------
+          Flow {
+            visible: root.providers.length > 1
+            width: parent.width
+            spacing: Style.space(8)
+
+            Repeater {
+              model: root.providers
+
+              delegate: Rectangle {
+                id: chip
+                required property var modelData
+                readonly property bool current: modelData.id === root.selectedId
+                readonly property var mainWindow: Model.mainWindow(modelData)
+                readonly property var mainPace: Model.pace(mainWindow || { group: "session", model: "", util: 0, resetsAt: null, window: 18000, rate: null }, root.now, modelData, root.cfg)
+
+                width: chipRow.implicitWidth + Style.space(18)
+                height: chipRow.implicitHeight + Style.space(10)
+                radius: height / 2
+                color: current ? Util.alpha(root.popupText, 0.14) : "transparent"
+                border.width: current ? 2 : 1
+                border.color: current ? root.popupText : root.popupLine
+
+                Row {
+                  id: chipRow
+                  anchors.centerIn: parent
+                  spacing: Style.space(6)
+
+                  Text {
+                    text: root.markOf(chip.modelData.id)
+                    color: root.levelText(chip.mainPace.level)
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fsText
+                  }
+
+                  Text {
+                    text: chip.modelData.name
+                    color: root.popupText
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fsText
+                    font.bold: chip.current
+                  }
+
+                  Text {
+                    text: chip.mainWindow ? Math.round(chip.mainPace.util) + "%" : "–"
+                    color: root.popupDim
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fsSmall
+                    font.features: { "tnum": 1 }
+                  }
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.select(chip.modelData.id)
+                }
+              }
             }
           }
 
@@ -737,7 +840,7 @@ Panel {
             visible: root.loaded && root.info.windows.length === 0
             width: parent.width
             wrapMode: Text.WordWrap
-            text: Model.noLimitsText(root.info, root.cfg)
+            text: root.providers.length === 0 ? Strings.t(root.cfg.lang, "noProviders") : Model.noLimitsText(root.info, root.cfg)
             color: root.popupDim
             font.family: root.fontFamily
             font.pixelSize: root.fsText

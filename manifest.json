@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "ismoil.claude-limit",
-  "name": "Claude limit",
-  "version": "2.0.0",
+  "id": "ismoil.ai-limits",
+  "name": "AI limits",
+  "version": "2.1.0",
   "author": "ismoil",
   "license": "MIT",
-  "description": "Claude usage limits in the bar, readable for low vision: the 5-hour window and the week with plain-language verdicts, a pace meter, forecast and a weekly-share ceiling. English and Russian, large-text mode, WCAG AA contrast.",
+  "description": "Usage limits of the AI tools on this machine — Claude, Codex, Gemini — in the bar, with a switch between them, plain-language verdicts, pace meters and forecasts. Readable for low vision (text scaling, WCAG AA contrast), English and Russian.",
   "kinds": [
     "bar-widget"
   ],
@@ -13,8 +13,8 @@
     "barWidget": "Widget.qml"
   },
   "barWidget": {
-    "displayName": "Claude limit",
-    "description": "5-hour limit in the bar; popup with the week and model limits, pace and forecast",
+    "displayName": "AI limits",
+    "description": "Claude, Codex and Gemini limits in the bar; popup with every window, pace and forecast",
     "category": "AI",
     "allowMultiple": false,
     "defaultSection": "right",
@@ -26,9 +26,16 @@
       "workFrom": 8,
       "workTo": 23,
       "animations": true,
-      "renewLogin": false
+      "renewLogin": false,
+      "providers": "all"
     },
     "schema": [
+      {
+        "key": "providers",
+        "type": "string",
+        "label": "AIs to show: all, or a list such as claude,codex,gemini",
+        "description": "Only tools that are signed in on this machine appear. The order in the popup is Claude, Codex, Gemini."
+      },
       {
         "key": "language",
         "type": "enum",

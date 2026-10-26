@@ -145,6 +145,7 @@ function pace(w, now, info, cfg) {
     runsOut: open && util < 100 && hoursToFull < spanLeft,
     ceiling: ceiling, capped: ceiling < 100, ratio: ratio, weekShare: weekShare,
     ratioSpan: info && info.ratioSpan ? info.ratioSpan : 0,
+    hasWeekly: !!overallWeekly(info),
     hoursToCeiling: hoursToCeiling,
     overCeiling: open && ceiling < 100 && (util >= ceiling - 0.5 || hoursToCeiling < spanLeft)
   }
@@ -183,11 +184,33 @@ function statusText(p, cfg) {
   return S.t(cfgOf(cfg).lang, p.status.id)
 }
 
+// "5-hour window", "Day", "Week", "30-day window": named by length, so any
+// provider's windows read right. `lower` for use inside "Fable · week".
+function windowName(seconds, cfg, lower) {
+  var lang = cfgOf(cfg).lang
+  var hours = Math.round(seconds / 3600)
+  var text = hours === 24 ? S.t(lang, "winDay")
+    : hours === 168 ? S.t(lang, "winWeek")
+    : hours % 24 === 0 ? S.t(lang, "winDays", { n: hours / 24 })
+    : S.t(lang, "winHours", { n: hours })
+  return lower ? text.toLowerCase() : text
+}
+
 function title(w, cfg) {
   if (!w) return ""
+  var name = windowName(w.window, cfg, !!w.model)
+  return w.model ? S.t(cfgOf(cfg).lang, "modelWindow", { model: w.model, window: name }) : name
+}
+
+// The bar chip's tag for a window: the model's initial, else its length (W, D, 30d).
+function shortName(w, cfg) {
+  if (w.model) return w.model.charAt(0)
   var lang = cfgOf(cfg).lang
-  if (w.group === "session") return S.t(lang, "session")
-  return w.model ? S.t(lang, "modelWeek", { model: w.model }) : S.t(lang, "week")
+  var hours = Math.round(w.window / 3600)
+  return hours === 168 ? S.t(lang, "shortWeek")
+    : hours === 24 ? S.t(lang, "shortDay")
+    : hours % 24 === 0 ? S.t(lang, "shortDays", { n: hours / 24 })
+    : S.t(lang, "shortHours", { n: hours })
 }
 
 // 3 h 26 min, 47 min; a week reads in days: 3 d 15 h. `compact` drops the
@@ -268,7 +291,7 @@ function rows(w, p, now, cfg) {
     return [{ label: t("rowReset"), value: t("rowResetValue", { when: when(w.resetsAt, now, cfg), left: duration(p.leftHours, cfg) }), strong: false, key: true }]
   }
   var out = [{ label: t("rowReset"), value: t("rowResetValue", { when: when(w.resetsAt, now, cfg), left: duration(p.leftHours, cfg) }), strong: false, key: true }]
-  if (w.group === "session") {
+  if (w.group === "session" && p.hasWeekly) {
     out.push({
       label: t("rowKeepUnder"),
       value: p.capped
@@ -312,9 +335,11 @@ function rows(w, p, now, cfg) {
 
 function staleText(info, cfg) {
   var lang = cfgOf(cfg).lang
+  var who = { tool: (info && info.tool) || "Claude Code", cmd: (info && info.cmd) || "claude" }
   var e = info ? info.error : ""
-  return e === "expired" ? S.t(lang, "staleExpired")
-    : e === "auth" ? S.t(lang, "staleAuth")
+  return e === "expired" ? S.t(lang, "staleExpired", who)
+    : e === "auth" ? S.t(lang, "staleAuth", who)
+    : e === "unavailable" ? S.t(lang, "staleUnavailable", who)
     : e === "ratelimit" ? S.t(lang, "staleRate")
     : e === "network" ? S.t(lang, "staleNetwork")
     : e
@@ -339,23 +364,48 @@ function footnote(cfg) {
   return S.t(cfg.lang, "footnote", { from: cfg.workFrom, to: cfg.workTo })
 }
 
-// Hover text for the bar: both windows in two lines.
-function tooltip(info, loaded, now, cfg) {
+// Hover text for the bar: every AI on the machine, its main window first.
+function tooltip(providers, loaded, now, cfg) {
   cfg = cfgOf(cfg)
   var t = function(k, params) { return S.t(cfg.lang, k, params) }
   if (!loaded) return t("tipLoading")
-  var ws = info.windows || []
-  var session = null
-  for (var i = 0; i < ws.length; i++) if (ws[i].group === "session") { session = ws[i]; break }
-  var sp = pace(session || { group: "session", model: "", util: 0, resetsAt: null, window: 18000, rate: null }, now, info, cfg)
-  var lines = [t("tipSession", { pct: Math.round(sp.util), status: statusText(sp, cfg) }) +
-    (sp.open ? t("tipReset", { when: when(session.resetsAt, now, cfg) }) : "")]
-  var weekly = overallWeekly(info)
-  if (weekly) {
-    var wp = pace(weekly, now, info, cfg)
-    lines.push(t("tipWeek", { pct: Math.round(wp.util), status: statusText(wp, cfg), when: wp.open ? when(weekly.resetsAt, now, cfg) : "—" }))
+  var lines = []
+  for (var i = 0; i < providers.length; i++) {
+    var info = providers[i]
+    var ws = info.windows || []
+    var main = null
+    for (var j = 0; j < ws.length; j++) if (ws[j].group === "session") { main = ws[j]; break }
+    if (!main && ws.length) main = ws[0]
+    if (!main) {
+      lines.push(info.name + ": " + (staleText(info, cfg) || t("noData")))
+      continue
+    }
+    var mp = pace(main, now, info, cfg)
+    lines.push(info.name + " · " + t("tipLine", { title: title(main, cfg), pct: Math.round(mp.util), status: statusText(mp, cfg) }) +
+      (mp.open ? t("tipReset", { when: when(main.resetsAt, now, cfg) }) : ""))
+    var weekly = main.group === "session" ? overallWeekly(info) : null
+    if (weekly) {
+      var wp = pace(weekly, now, info, cfg)
+      lines.push("   " + t("tipLine", { title: title(weekly, cfg), pct: Math.round(wp.util), status: statusText(wp, cfg) }) +
+        (wp.open ? t("tipReset", { when: when(weekly.resetsAt, now, cfg) }) : ""))
+    }
+    if (!info.ok && info.error) lines.push("   " + staleText(info, cfg))
   }
-  if (!info.ok && info.error) lines.push(staleText(info, cfg))
   lines.push(t("tipHint"))
+  if (providers.length > 1) lines.push(t("tipSwitch"))
   return lines.join("\n")
+}
+
+// The main window of a provider: its session window, else the first one.
+function mainWindow(info) {
+  var ws = info && info.windows ? info.windows : []
+  for (var i = 0; i < ws.length; i++) if (ws[i].group === "session") return ws[i]
+  return ws.length ? ws[0] : null
+}
+
+// The bar's time-to-reset, or the window's length when it is not open.
+function barTime(p, w, cfg) {
+  cfg = cfgOf(cfg)
+  if (p.open) return duration(p.leftHours, cfg, true)
+  return duration((w ? w.window : 18000) / 3600, cfg, true)
 }

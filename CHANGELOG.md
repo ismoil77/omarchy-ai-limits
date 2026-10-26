@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.1.0 — AI limits
+
+- **Claude, Codex and Gemini.** The widget (renamed from "Claude limit", id `ismoil.ai-limits`)
+  shows every AI tool that is signed in on the machine, with a switch in the popup (click,
+  `h`/`l`, `1`–`3`) and on the bar (middle click). Codex reads its limits through
+  `codex app-server`; Gemini through Google Code Assist's quota (per-model daily windows).
+  Windows of any length are paced: up to 6 hours in clock time, longer ones over active hours.
+- `providers` setting (`all` or a list). The hover tooltip lists every AI.
+- Per-provider cache and state (`~/.cache/ismoil-ai-limits/`); the old Claude-only state is carried over.
+- Gemini is built on the documented API and response-shape tests; not yet confirmed on a live account.
+- 148 automated tests.
+
 ## 2.0.0
 
 - **Readable by people with low vision.** Text never goes below 13 px and scales

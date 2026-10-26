@@ -166,7 +166,9 @@ test("nothing spent: idle, no pace rows", () => {
   const p = paceOf(w, info([w], { ratio: null }))
   assert.equal(p.status.id, "statusUnused")
   assert.equal(p.level, "idle")
-  assert.deepEqual(plain(M.rows(w, p, MON_NOON, EN).map(r => r.label)), ["Resets", "Keep under"])
+  assert.deepEqual(plain(M.rows(w, p, MON_NOON, EN).map(r => r.label)), ["Resets"]) // no long window to protect
+  const withWeek = paceOf(w, info([w, week({ util: 10 })]))
+  assert.deepEqual(plain(M.rows(w, withWeek, MON_NOON, EN).map(r => r.label)), ["Resets", "Keep under"])
 })
 
 test("weekly ceiling: the 5-hour window is capped by what is left of the week", () => {
@@ -194,8 +196,17 @@ test("past the ceiling is yellow 'over weekly share', and says so in both langua
 
 test("an uncapped window says the week does not limit it", () => {
   const s = session({ util: 10, rate: 1 })
-  const p = paceOf(s, info([s], { ratio: null }))
+  const p = paceOf(s, info([s, week({ util: 0 })], { ratio: 0.0001 })) // a tiny week share per window point: never binds
+  assert.equal(p.capped, false)
   assert.equal(M.rows(s, p, MON_NOON, EN).find(r => r.label === "Keep under").value, "the week does not limit this window")
+})
+
+test("no long window to protect: no ceiling and no Keep-under row", () => {
+  const s = session({ util: 10, rate: 1 })
+  const p = paceOf(s, info([s]))
+  assert.equal(p.hasWeekly, false)
+  assert.equal(p.capped, false)
+  assert.ok(!M.rows(s, p, MON_NOON, EN).some(r => r.label === "Keep under"))
 })
 
 test("weekly pace is measured in active hours, not clock time", () => {
@@ -305,18 +316,29 @@ test("russian text uses the comma and 'вы', never 'ты'", () => {
 })
 
 // ---------------------------------------------------------------- bar and header text
-test("tooltip", () => {
-  const s = session({ util: 20, rate: 1 })
-  const wk = week({ util: 10 })
-  assert.equal(M.tooltip(info([s, wk]), false, MON_NOON, EN), "Claude · loading…")
-  const lines = M.tooltip(info([s, wk]), true, MON_NOON, EN).split("\n")
-  assert.match(lines[0], /^5-hour window: 20% · .* · resets 15:00$/)
-  assert.match(lines[1], /^Week: 10% · .* · resets Mon 03:00$/)
+const provider = (id, name, ws, extra = {}) => ({ id, name, tool: name, cmd: id, ok: true, error: "", windows: ws, ratio: 0.1, ...extra })
+
+test("tooltip: one line per AI with its main window, the week under Claude's", () => {
+  const claude = provider("claude", "Claude", [session({ util: 20, rate: 1 }), week({ util: 10 })])
+  assert.equal(M.tooltip([claude], false, MON_NOON, EN), "AI limits · loading…")
+  const lines = M.tooltip([claude], true, MON_NOON, EN).split("\n")
+  assert.match(lines[0], /^Claude · 5-hour window: 20% · .* · resets 15:00$/)
+  assert.match(lines[1], /^ {3}Week: 10% · .* · resets Mon 03:00$/)
   assert.equal(lines.at(-1), "Click for details")
-  const stale = M.tooltip(info([s], { ok: false, error: "network" }), true, MON_NOON, EN).split("\n")
-  assert.ok(stale.includes("no network"))
-  const closed = M.tooltip(info([session({ util: 0, resetsAt: null })]), true, MON_NOON, RU).split("\n")[0]
-  assert.equal(closed, "5 часов: 0% · не начато")
+  assert.ok(!lines.includes("Middle click: next AI"), "no switch hint with one AI")
+})
+
+test("tooltip: several AIs, a hint to switch, a long-window-only AI, and errors", () => {
+  const codex = provider("codex", "Codex", [{ key: "codex:primary", group: "weekly", model: "", util: 3, resetsAt: at(26, 12) + 29 * 86400, window: 30 * 86400, rate: null }])
+  const gemini = provider("gemini", "Gemini", [], { ok: false, error: "expired", tool: "Gemini CLI" })
+  const claude = provider("claude", "Claude", [session({ util: 1, resetsAt: null }), week({ util: 0, resetsAt: null })], { ok: false, error: "network" })
+  const lines = M.tooltip([claude, codex, gemini], true, MON_NOON, EN).split("\n")
+  assert.match(lines.find(l => l.startsWith("Codex")), /^Codex · 30-day window: 3% · /)
+  assert.ok(lines.includes("Gemini: Gemini CLI sign-in expired — run gemini"))
+  assert.ok(lines.some(l => l === "   no network"))
+  assert.equal(lines.at(-1), "Middle click: next AI")
+  assert.match(lines[0], /^Claude · 5-hour window: 0% · not started$/)
+  assert.equal(M.tooltip([codex], true, MON_NOON, RU).split("\n")[0].slice(0, 22), "Codex · Окно 30 дн: 3%")
 })
 
 test("stale and no-limits texts", () => {
@@ -344,4 +366,92 @@ test("footnote states the active hours", () => {
 test("status glyphs differ per level, so colour is never the only signal", () => {
   const glyphs = ["green", "yellow", "red", "idle"].map(l => M.GLYPHS[l])
   assert.equal(new Set(glyphs).size, 4)
+})
+
+// ---------------------------------------------------------------- any provider's windows
+test("windows are named by length: hours, a day, a week, days", () => {
+  const n = (h, c = EN, lower = false) => M.windowName(h * 3600, c, lower)
+  assert.equal(n(5), "5-hour window")
+  assert.equal(n(24), "Day")
+  assert.equal(n(168), "Week")
+  assert.equal(n(720), "30-day window")
+  assert.equal(n(48), "2-day window")
+  assert.equal(n(5, RU), "Окно 5 ч")
+  assert.equal(n(24, RU), "Сутки")
+  assert.equal(n(168, RU), "Неделя")
+  assert.equal(n(720, RU), "Окно 30 дн")
+  assert.equal(n(168, EN, true), "week")
+})
+
+test("model windows read '<model> · <length>'", () => {
+  const gem = { group: "weekly", model: "Pro", window: 86400 }
+  assert.equal(M.title(gem, EN), "Pro · day")
+  assert.equal(M.title(gem, RU), "Pro · сутки")
+  assert.equal(M.title({ group: "session", model: "", window: 18000 }, EN), "5-hour window")
+})
+
+test("short tags for the bar chip", () => {
+  const t = (w, c = EN) => M.shortName({ model: "", ...w }, c)
+  assert.equal(t({ window: 168 * 3600 }), "W")
+  assert.equal(t({ window: 168 * 3600 }, RU), "н")
+  assert.equal(t({ window: 86400 }), "D")
+  assert.equal(t({ window: 720 * 3600 }), "30d")
+  assert.equal(t({ window: 5 * 3600 }), "5h")
+  assert.equal(t({ window: 86400, model: "Pro" }), "P")
+})
+
+test("stale texts name the AI that failed", () => {
+  const g = { error: "expired", tool: "Gemini CLI", cmd: "gemini" }
+  assert.equal(M.staleText(g, EN), "Gemini CLI sign-in expired — run gemini")
+  assert.equal(M.staleText(g, RU), "вход в Gemini CLI истёк — запустите gemini")
+  assert.equal(M.staleText({ error: "auth", tool: "Codex", cmd: "codex" }, EN), "not signed in to Codex")
+  assert.equal(M.staleText({ error: "unavailable", tool: "Codex", cmd: "codex" }, EN), "Codex limits are unavailable right now")
+  assert.equal(M.staleText({ error: "unavailable", tool: "Codex", cmd: "codex" }, RU), "лимиты Codex сейчас недоступны")
+})
+
+test("mainWindow prefers the session window, else the first", () => {
+  const s = session(), wk = week()
+  assert.equal(M.mainWindow({ windows: [wk, s] }), s)
+  assert.equal(M.mainWindow({ windows: [wk] }), wk)
+  assert.equal(M.mainWindow({ windows: [] }), null)
+  assert.equal(M.mainWindow(null), null)
+})
+
+test("bar time: the countdown when open, the window's length when not", () => {
+  const s = session({ resetsAt: MON_NOON + 4.5 * 3600 })
+  assert.equal(M.barTime(paceOf(s, info([s])), s, EN), "4h30m")
+  const closed = session({ resetsAt: null })
+  assert.equal(M.barTime(paceOf(closed, info([closed])), closed, EN), "5h")
+  assert.equal(M.barTime(paceOf(closed, info([closed])), null, EN), "5h")
+  const day = { group: "weekly", model: "Pro", util: 0, resetsAt: null, window: 86400, rate: null }
+  assert.equal(M.barTime(paceOf(day, info([day])), day, EN), "1d")
+})
+
+test("a 30-day window (Codex Go) is paced in active hours and says what to do", () => {
+  const start = at(26, 0)
+  const w = { group: "weekly", model: "", util: 3, resetsAt: start + 30 * 86400, window: 30 * 86400, rate: null }
+  const now = at(30, 12)
+  const p = paceOf(w, info([w], { ratio: null }), now)
+  const done = M.workHours(start, now, EN)
+  const all = M.workHours(start, w.resetsAt, EN)
+  assert.ok(Math.abs(p.target - (100 * done) / all) < 1e-6)
+  assert.equal(p.weekly, true)
+  assert.equal(p.level, "green")
+  assert.match(M.rateText(w, p.allowed, EN), /per day$/)
+  assert.equal(M.rows(w, p, now, EN)[0].value, "Wed 00:00 (in 25 d 12 h)")
+})
+
+test("a daily Gemini quota runs out at a clock time inside active hours", () => {
+  const reset = at(27, 3)
+  const w = { group: "weekly", model: "Pro", util: 60, resetsAt: reset, window: 86400, rate: null }
+  const now = at(26, 14)
+  const p = paceOf(w, info([w], { ratio: null }), now)
+  assert.equal(p.open, true)
+  assert.equal(p.runsOut, true) // 60% in 6 active hours of 15: too fast for the rest of the day
+  const hour = new Date(p.runsOutAt * 1000).getHours()
+  assert.ok(hour >= 8 && hour < 23, `ends at hour ${hour}`)
+})
+
+test("the empty state has words in both languages", () => {
+  assert.match(M.noLimitsText({ error: "auth", tool: "Codex", cmd: "codex" }, EN), /not signed in to Codex/)
 })

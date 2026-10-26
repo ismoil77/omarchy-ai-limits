@@ -51,10 +51,16 @@ class Sandbox(unittest.TestCase):
     self.claude = root / "claude"
     self.claude.mkdir()
     self.cache = root / "cache"
+    self.codex = root / "codex"
+    self.codex.mkdir()
+    self.gemini = root / "gemini"
+    self.gemini.mkdir()
     patches = [
       mock.patch.object(limit, "CLAUDE_DIR", self.claude),
+      mock.patch.object(limit, "CODEX_DIR", self.codex),
+      mock.patch.object(limit, "GEMINI_DIR", self.gemini),
       mock.patch.object(limit, "CACHE_DIR", self.cache),
-      mock.patch.object(limit, "STATE", self.cache / "state.json"),
+      mock.patch.object(limit, "LEGACY_CACHE_DIR", root / "legacy-cache"),
     ]
     for p in patches:
       p.start()
@@ -180,16 +186,16 @@ class LearnRatio(unittest.TestCase):
 class Plan(Sandbox):
   def test_names(self):
     self.login()
-    self.assertEqual(limit.plan(), "Max 5x")
+    self.assertEqual(limit.claude_plan(), "Max 5x")
 
   def test_20x_and_plain(self):
     self.login(rateLimitTier="default_claude_max_20x")
-    self.assertEqual(limit.plan(), "Max 20x")
+    self.assertEqual(limit.claude_plan(), "Max 20x")
     self.login(rateLimitTier="")
-    self.assertEqual(limit.plan(), "Max")
+    self.assertEqual(limit.claude_plan(), "Max")
 
   def test_no_file(self):
-    self.assertEqual(limit.plan(), "")
+    self.assertEqual(limit.claude_plan(), "")
     self.assertEqual(limit.token(), ("", 0))
 
 
@@ -289,27 +295,37 @@ class Renew(Sandbox):
 
 
 class Run(Sandbox):
+  """The Claude provider through poll()/run(): fetching, back-off, samples."""
+
   def run_with(self, now=NOW, fetch=None, force=False, renew=True):
     fetch = fetch or (lambda access: limit.windows(USAGE))
-    with mock.patch.object(limit.time, "time", return_value=now), mock.patch.object(limit, "fetch", fetch):
-      return limit.run(force, renew)
+    with mock.patch.object(limit.time, "time", return_value=now), mock.patch.object(limit, "claude_request", fetch):
+      return limit.run(force, renew, only=["claude"])["providers"][0]
 
   def windows_future(self):
     return [{"key": "five_hour", "group": "session", "model": "", "util": 20.0,
              "resetsAt": NOW + 3600, "window": 18000, "severity": ""}]
+
+  def state(self):
+    return json.loads((self.cache / "state-claude.json").read_text())
 
   def test_ok_path_writes_state_and_reports_windows(self):
     self.login()
     out = self.run_with(fetch=lambda a: self.windows_future())
     self.assertTrue(out["ok"])
     self.assertEqual(out["error"], "")
+    self.assertEqual((out["id"], out["name"], out["tool"], out["cmd"]), ("claude", "Claude", "Claude Code", "claude"))
     self.assertEqual(out["plan"], "Max 5x")
     self.assertEqual(out["windows"][0]["util"], 20.0)
     self.assertIsNone(out["windows"][0]["rate"])
-    state = json.loads((self.cache / "state.json").read_text())
-    self.assertEqual(len(state["samples"]["five_hour"]), 1)
+    self.assertEqual(len(self.state()["samples"]["five_hour"]), 1)
 
-  def test_no_login(self):
+  def test_no_login_means_claude_is_not_listed(self):
+    self.assertEqual(limit.run(only=["claude"])["providers"], [])
+
+  def test_empty_login_file_is_auth(self):
+    path = self.login()
+    path.write_text(json.dumps({"claudeAiOauth": {}}))
     out = self.run_with()
     self.assertEqual((out["ok"], out["error"]), (False, "auth"))
 
@@ -369,9 +385,7 @@ class Run(Sandbox):
     self.login()
     out = self.run_with(fetch=lambda a: (_ for _ in ()).throw(http_error(429, {"retry-after": "300"})))
     self.assertEqual(out["error"], "ratelimit")
-    state = json.loads((self.cache / "state.json").read_text())
-    self.assertEqual(state["backoffUntil"], NOW + 300)
-    # Still inside the back-off: no new request.
+    self.assertEqual(self.state()["backoffUntil"], NOW + 300)
     boom = mock.Mock(side_effect=AssertionError("must not fetch"))
     self.assertEqual(self.run_with(now=NOW + 100, fetch=boom)["error"], "ratelimit")
 
@@ -411,26 +425,351 @@ class Run(Sandbox):
 
   def test_output_is_json_serialisable(self):
     self.login()
-    json.dumps(self.run_with(fetch=lambda a: self.windows_future()))
+    json.dumps(limit.run(only=["claude"]))
+
+  def test_legacy_state_is_carried_over(self):
+    self.login()
+    legacy = self.cache.parent / "legacy-cache"
+    legacy.mkdir()
+    (legacy / "state.json").write_text(json.dumps({"ratio": {"ds": 100.0, "dw": 20.0}}))
+    out = self.run_with(fetch=lambda a: self.windows_future())
+    self.assertEqual(out["ratioSpan"], 100.0)
+    self.assertAlmostEqual(out["ratio"], (20 + 1.5) / (100 + 15))
+
+
+RATE_LIMITS = {
+  "planType": "plus",
+  "primary": {"usedPercent": 12, "windowDurationMins": 300, "resetsAt": NOW + 3600},
+  "secondary": {"usedPercent": 40.5, "windowDurationMins": 10080, "resetsAt": NOW + 86400},
+}
+
+
+class CodexWindows(unittest.TestCase):
+  def test_primary_and_secondary(self):
+    out = limit.codex_windows(RATE_LIMITS)
+    self.assertEqual([(w["key"], w["group"], w["util"], w["window"]) for w in out],
+                     [("codex:primary", "session", 12.0, 18000), ("codex:secondary", "weekly", 40.5, 604800)])
+    self.assertEqual(out[0]["resetsAt"], NOW + 3600)
+
+  def test_a_single_long_window_is_a_weekly_group(self):
+    out = limit.codex_windows({"primary": {"usedPercent": 0, "windowDurationMins": 43200, "resetsAt": NOW + 5}})
+    self.assertEqual([(w["group"], w["window"]) for w in out], [("weekly", 43200 * 60)])
+
+  def test_missing_length_falls_back_to_the_slot_default(self):
+    out = limit.codex_windows({"primary": {"usedPercent": 1}, "secondary": {"usedPercent": 2}})
+    self.assertEqual([w["window"] for w in out], [300 * 60, 10080 * 60])
+    self.assertIsNone(out[0]["resetsAt"])
+
+  def test_ignores_empty_and_broken_slots(self):
+    self.assertEqual(limit.codex_windows({}), [])
+    self.assertEqual(limit.codex_windows({"primary": None, "secondary": {"usedPercent": None}}), [])
+    self.assertEqual(limit.codex_windows({"primary": {"usedPercent": "x"}}), [])
+
+  def test_percent_is_clamped(self):
+    self.assertEqual(limit.codex_windows({"primary": {"usedPercent": 250, "windowDurationMins": 60}})[0]["util"], 100.0)
+
+
+class FakeProc:
+  """A `codex app-server` that answers the three RPC calls from a script."""
+
+  def __init__(self, answers):
+    self.answers = answers
+    self.sent = []
+    self.stdin = mock.Mock()
+    self.stdin.write = lambda text: self.sent.append(json.loads(text))
+    self.stdout = mock.Mock()
+    self.terminated = False
+
+  def terminate(self):
+    self.terminated = True
+
+  def wait(self, timeout=None):
+    return 0
+
+  def kill(self):
+    pass
+
+
+class CodexFetch(Sandbox):
+  def reply(self, answers):
+    proc = FakeProc(answers)
+
+    def rpc(p, request_id, method, params=None, timeout=0):
+      if isinstance(answers.get(method), Exception):
+        raise answers[method]
+      proc.sent.append((method, params))
+      return {"id": request_id, **answers[method]}
+
+    patches = (mock.patch.object(limit, "find_codex", return_value="/bin/codex"),
+               mock.patch.object(limit.subprocess, "Popen", return_value=proc),
+               mock.patch.object(limit, "rpc_request", rpc))
+    for p in patches:
+      p.start()
+      self.addCleanup(p.stop)
+    return proc
+
+  GOOD = {
+    "initialize": {"result": {}},
+    "account/read": {"result": {"account": {"type": "chatgpt", "planType": "plus"}}},
+    "account/rateLimits/read": {"result": {"rateLimits": RATE_LIMITS}},
+  }
+
+  def test_fetch_returns_windows_and_plan_and_stops_the_process(self):
+    proc = self.reply(self.GOOD)
+    out = limit.fetch_codex({}, NOW, False)
+    self.assertEqual(out["plan"], "Plus")
+    self.assertEqual(len(out["windows"]), 2)
+    self.assertTrue(proc.terminated)
+    self.assertEqual(proc.sent[0][0], "initialize")
+    self.assertEqual(proc.sent[0][1]["clientInfo"]["name"], "ismoil-ai-limits")
+
+  def test_not_signed_in_is_auth(self):
+    self.reply({**self.GOOD, "account/read": {"result": {"account": None}},
+                "account/rateLimits/read": {"error": {"code": -1, "message": "no auth"}}})
+    with self.assertRaises(limit.Failure) as ctx:
+      limit.fetch_codex({}, NOW, False)
+    self.assertEqual(ctx.exception.kind, "auth")
+
+  def test_signed_in_but_no_limits_is_unavailable(self):
+    self.reply({**self.GOOD, "account/rateLimits/read": {"error": {"code": -1, "message": "boom"}}})
+    with self.assertRaises(limit.Failure) as ctx:
+      limit.fetch_codex({}, NOW, False)
+    self.assertEqual(ctx.exception.kind, "unavailable")
+
+  def test_timeout_is_unavailable_and_process_is_still_stopped(self):
+    proc = self.reply({**self.GOOD, "account/read": TimeoutError("account/read")})
+    with self.assertRaises(limit.Failure) as ctx:
+      limit.fetch_codex({}, NOW, False)
+    self.assertEqual(ctx.exception.kind, "unavailable")
+    self.assertTrue(proc.terminated)
+
+  def test_no_binary_is_unavailable(self):
+    with mock.patch.object(limit, "find_codex", return_value=None):
+      with self.assertRaises(limit.Failure):
+        limit.fetch_codex({}, NOW, False)
+
+  def test_detected_needs_the_binary_and_a_login(self):
+    with mock.patch.object(limit, "find_codex", return_value="/bin/codex"):
+      self.assertFalse(limit.codex_detected())
+      (self.codex / "auth.json").write_text("{}")
+      self.assertTrue(limit.codex_detected())
+    with mock.patch.object(limit, "find_codex", return_value=None):
+      self.assertFalse(limit.codex_detected())
+
+
+BUCKETS = {"buckets": [
+  {"modelId": "gemini-2.5-pro", "remainingFraction": 0.75, "resetTime": "2027-01-15T10:00:00Z", "tokenType": "REQUESTS"},
+  {"modelId": "gemini-3.1-pro-preview", "remainingFraction": 0.5, "resetTime": "2027-01-15T11:00:00Z"},
+  {"modelId": "gemini-2.5-flash", "remainingFraction": 1, "resetTime": "2027-01-15T12:00:00Z"},
+  {"modelId": "gemini-2.5-flash-lite", "remainingFraction": 0.9},
+  {"modelId": "gemini-embedding", "remainingFraction": 0.2},
+  {"modelId": "", "remainingFraction": 0.1},
+  {"modelId": "gemini-x-pro", "remainingFraction": "nan"},
+  "junk",
+]}
+
+
+class GeminiWindows(unittest.TestCase):
+  def test_families_use_the_most_used_bucket(self):
+    out = limit.gemini_windows(BUCKETS)
+    self.assertEqual([(w["key"], w["model"], round(w["util"], 6)) for w in out], [
+      ("gemini:Pro", "Pro", 50.0), ("gemini:Flash", "Flash", 0.0), ("gemini:Flash Lite", "Flash Lite", 10.0),
+      ("gemini:gemini-embedding", "gemini-embedding", 80.0)])
+    self.assertEqual(out[0]["resetsAt"], limit.parse_time("2027-01-15T11:00:00Z"))
+    self.assertEqual({w["window"] for w in out}, {86400})
+    self.assertEqual({w["group"] for w in out}, {"weekly"})  # longer than six hours: paced in active hours
+
+  def test_a_full_quota_has_no_remaining_amount(self):
+    out = limit.gemini_windows({"buckets": [{"modelId": "gemini-2.5-pro", "remainingFraction": 1}]})
+    self.assertEqual(out[0]["util"], 0.0)
+
+  def test_fraction_is_clamped(self):
+    out = limit.gemini_windows({"buckets": [{"modelId": "gemini-2.5-pro", "remainingFraction": -3}]})
+    self.assertEqual(out[0]["util"], 100.0)
+
+  def test_empty(self):
+    self.assertEqual(limit.gemini_windows({}), [])
+    self.assertEqual(limit.gemini_windows(None), [])
+
+  def test_family(self):
+    for model, family in (("gemini-2.5-pro", "Pro"), ("gemini-2.5-flash", "Flash"), ("gemini-2.5-flash-lite", "Flash Lite"),
+                          ("gemini-2.5-flash_lite", "Flash Lite"), ("other", "other")):
+      self.assertEqual(limit.gemini_family(model), family)
+
+
+class GeminiFetch(Sandbox):
+  def creds(self, expires_in=3600, access="g-access"):
+    (self.gemini / "oauth_creds.json").write_text(json.dumps({
+      "access_token": access, "refresh_token": "r", "expiry_date": int((NOW + expires_in) * 1000)}))
+
+  def test_detected(self):
+    self.assertFalse(limit.gemini_detected())
+    self.creds()
+    self.assertTrue(limit.gemini_detected())
+
+  def test_fetch_discovers_the_project_then_reads_the_quota_and_caches_both(self):
+    self.creds()
+    calls = []
+
+    def post(method, access, body):
+      calls.append((method, access, body))
+      if method == "loadCodeAssist":
+        return {"cloudaicompanionProject": "proj-1", "currentTier": {"id": "standard-tier", "name": "Gemini Code Assist"}}
+      return BUCKETS
+
+    state = {}
+    with mock.patch.object(limit, "gemini_post", post):
+      out = limit.fetch_gemini(state, NOW, False)
+      limit.fetch_gemini(state, NOW + 200, False)
+    self.assertEqual([c[0] for c in calls], ["loadCodeAssist", "retrieveUserQuota", "retrieveUserQuota"])
+    self.assertEqual(calls[1][2], {"project": "proj-1"})
+    self.assertEqual(calls[0][1], "g-access")
+    self.assertEqual(out["plan"], "Gemini Code Assist")
+    self.assertEqual(len(out["windows"]), 4)
+
+  def test_project_given_as_an_object(self):
+    self.creds()
+    state = {}
+    with mock.patch.object(limit, "gemini_post", lambda m, a, b: {"cloudaicompanionProject": {"id": "p2"}} if m == "loadCodeAssist" else BUCKETS):
+      limit.fetch_gemini(state, NOW, False)
+    self.assertEqual(state["project"], "p2")
+
+  def test_expired_token_is_expired_without_a_request(self):
+    self.creds(expires_in=-5)
+    with mock.patch.object(limit, "gemini_post", side_effect=AssertionError("no request")):
+      with self.assertRaises(limit.Failure) as ctx:
+        limit.fetch_gemini({}, NOW, True)
+    self.assertEqual(ctx.exception.kind, "expired")
+
+  def test_missing_token_is_auth(self):
+    with self.assertRaises(limit.Failure) as ctx:
+      limit.fetch_gemini({}, NOW, False)
+    self.assertEqual(ctx.exception.kind, "auth")
+
+  def test_http_errors_map_to_failures(self):
+    self.creds()
+    for code, kind in ((401, "expired"), (429, "ratelimit"), (500, "http 500")):
+      with mock.patch.object(limit, "gemini_post", side_effect=http_error(code, {"retry-after": "30"})):
+        with self.assertRaises(limit.Failure) as ctx:
+          limit.fetch_gemini({}, NOW, False)
+      self.assertEqual(ctx.exception.kind, kind)
+
+  def test_empty_quota_is_unavailable(self):
+    self.creds()
+    with mock.patch.object(limit, "gemini_post", lambda m, a, b: {"cloudaicompanionProject": "p"} if m == "loadCodeAssist" else {}):
+      with self.assertRaises(limit.Failure) as ctx:
+        limit.fetch_gemini({}, NOW, False)
+    self.assertEqual(ctx.exception.kind, "unavailable")
+
+
+class RunAll(Sandbox):
+  def setUp(self):
+    super().setUp()
+    self.login()
+    self.creds_g()
+    (self.codex / "auth.json").write_text("{}")
+    codex = {"windows": limit.codex_windows(RATE_LIMITS), "plan": "Plus"}
+    gem = {"windows": limit.gemini_windows(BUCKETS), "plan": "Standard"}
+    for name, value in (("claude_request", lambda a: [{"key": "five_hour", "group": "session", "model": "", "util": 5.0,
+                                                       "resetsAt": NOW + 600, "window": 18000, "severity": ""}]),
+                        ("find_codex", lambda: "/bin/codex")):
+      p = mock.patch.object(limit, name, value)
+      p.start()
+      self.addCleanup(p.stop)
+    p = mock.patch.dict(limit.FETCHERS, {"codex": lambda s, n, r: codex, "gemini": lambda s, n, r: gem})
+    p.start()
+    self.addCleanup(p.stop)
+    p = mock.patch.object(limit.time, "time", return_value=NOW)
+    p.start()
+    self.addCleanup(p.stop)
+
+  def creds_g(self):
+    (self.gemini / "oauth_creds.json").write_text(json.dumps({"access_token": "a", "expiry_date": int((NOW + 999) * 1000)}))
+
+  def test_lists_every_detected_provider_in_order(self):
+    out = limit.run()
+    self.assertEqual([p["id"] for p in out["providers"]], ["claude", "codex", "gemini"])
+    self.assertEqual(out["selected"], "claude")
+    self.assertEqual([p["plan"] for p in out["providers"]], ["Max 5x", "Plus", "Standard"])
+    self.assertEqual(len(out["providers"][1]["windows"]), 2)
+
+  def test_each_provider_has_its_own_state_file(self):
+    limit.run()
+    self.assertEqual(sorted(p.name for p in self.cache.glob("state-*.json")), ["state-claude.json", "state-codex.json", "state-gemini.json"])
+
+  def test_undetected_providers_are_left_out(self):
+    (self.gemini / "oauth_creds.json").unlink()
+    self.assertEqual([p["id"] for p in limit.run()["providers"]], ["claude", "codex"])
+
+  def test_providers_filter(self):
+    self.assertEqual([p["id"] for p in limit.run(only=["gemini", "claude"])["providers"]], ["claude", "gemini"])
+
+  def test_one_failing_provider_does_not_hide_the_others(self):
+    boom = mock.Mock(side_effect=limit.Failure("expired"))
+    with mock.patch.dict(limit.FETCHERS, {"gemini": boom}):
+      out = limit.run()
+    by = {p["id"]: p for p in out["providers"]}
+    self.assertEqual((by["gemini"]["ok"], by["gemini"]["error"]), (False, "expired"))
+    self.assertTrue(by["claude"]["ok"] and by["codex"]["ok"])
+
+  def test_a_crashing_fetcher_is_a_network_error(self):
+    with mock.patch.dict(limit.FETCHERS, {"codex": mock.Mock(side_effect=RuntimeError("bug"))}):
+      out = limit.run()
+    self.assertEqual({p["id"]: p["error"] for p in out["providers"]}["codex"], "network")
+
+  def test_selection_is_remembered_and_validated(self):
+    limit.write_selected("codex")
+    self.assertEqual(limit.run()["selected"], "codex")
+    limit.write_selected("nonsense")  # ignored
+    self.assertEqual(limit.run()["selected"], "codex")
+    limit.write_selected("gemini")
+    (self.gemini / "oauth_creds.json").unlink()  # selected but gone: fall back to the first
+    self.assertEqual(limit.run()["selected"], "claude")
+
+  def test_nothing_installed(self):
+    (self.claude / ".credentials.json").unlink()
+    (self.gemini / "oauth_creds.json").unlink()
+    (self.codex / "auth.json").unlink()
+    self.assertEqual(limit.run(), {"selected": "", "providers": []})
+
+  def test_codex_is_asked_less_often_than_claude(self):
+    calls = []
+    with mock.patch.dict(limit.FETCHERS, {"codex": lambda s, n, r: calls.append(n) or {"windows": limit.codex_windows(RATE_LIMITS), "plan": ""}}):
+      limit.run()
+      with mock.patch.object(limit.time, "time", return_value=NOW + 60):
+        limit.run()
+      with mock.patch.object(limit.time, "time", return_value=NOW + 130):
+        limit.run()
+    self.assertEqual(len(calls), 2)
 
 
 class Cli(Sandbox):
+  def test_flags_reach_run(self):
+    for argv, want in (([], (False, False, None)), (["--force"], (True, False, None)), (["--renew"], (False, True, None)),
+                       (["--force", "--renew"], (True, True, None)), (["--providers", "codex, gemini"], (False, False, ["codex", "gemini"])),
+                       (["--providers", "bogus"], (False, False, None)), (["--providers"], (False, False, None))):
+      with mock.patch.object(limit, "run", return_value={}) as run, mock.patch("sys.stdout", io.StringIO()):
+        limit.main(argv)
+      run.assert_called_once_with(want[0], renew=want[1], only=want[2])
+
+  def test_select_flag_writes_the_choice(self):
+    with mock.patch.object(limit, "run", return_value={}), mock.patch("sys.stdout", io.StringIO()):
+      limit.main(["--select", "codex"])
+    self.assertEqual(limit.read_selected(), "codex")
+
   def test_prints_one_json_object(self):
     # run_path re-executes the module, so point it at the sandbox by environment.
     self.login()
     out = io.StringIO()
-    env = {"CLAUDE_CONFIG_DIR": str(self.claude), "XDG_CACHE_HOME": str(self.cache.parent)}
-    with mock.patch.dict(os.environ, env), mock.patch.object(sys, "argv", ["limit.py", "--force"]), \
+    env = {"CLAUDE_CONFIG_DIR": str(self.claude), "CODEX_HOME": str(self.codex), "XDG_CACHE_HOME": str(self.cache.parent),
+           "HOME": str(self.cache.parent)}
+    with mock.patch.dict(os.environ, env), mock.patch.object(sys, "argv", ["limit.py", "--force", "--providers", "claude"]), \
          mock.patch("sys.stdout", out), \
          mock.patch.object(urllib.request, "urlopen", lambda *a, **k: FakeResponse({"limits": []})):
       runpy.run_path(limit.__file__, run_name="__main__")
-    self.assertEqual(json.loads(out.getvalue())["windows"], [])
-
-  def test_flags_reach_run(self):
-    for argv, want in (([], (False, False)), (["--force"], (True, False)), (["--renew"], (False, True)), (["--force", "--renew"], (True, True))):
-      with mock.patch.object(limit, "run", return_value={}) as run, mock.patch("sys.stdout", io.StringIO()):
-        limit.main(argv)
-      run.assert_called_once_with(*[want[0]], renew=want[1])
+    data = json.loads(out.getvalue())
+    self.assertEqual([p["id"] for p in data["providers"]], ["claude"])
+    self.assertEqual(data["providers"][0]["windows"], [])
 
 
 if __name__ == "__main__":

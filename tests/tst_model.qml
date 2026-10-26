@@ -14,7 +14,7 @@ TestCase {
     compare(cfg.lang, "ru")
     compare(Model.duration(4.75, cfg), "4 ч 45 мин")
     compare(Model.duration(4.75, Model.config({ language: "en" }), true), "4h45m")
-    compare(Strings.t("en", "week"), "Week")
+    compare(Strings.t("en", "winWeek"), "Week")
     compare(Strings.num("ru", 7.2, 1), "7,2")
     compare(Contrast.ratio("#000000", "#ffffff").toFixed(0), "21")
   }
@@ -28,7 +28,14 @@ TestCase {
     compare(p.status.id, "statusRunsOut")
     verify(Model.summary(w, p, now, cfg).indexOf("runs out") >= 0)
     verify(Model.rows(w, p, now, cfg).length >= 4)
-    verify(Model.tooltip({ ok: true, windows: [w] }, true, now, cfg).indexOf("5-hour window") === 0)
+    verify(Model.tooltip([{ id: "claude", name: "Claude", ok: true, windows: [w] }], true, now, cfg).indexOf("Claude · 5-hour window") === 0)
+  }
+
+  function test_other_providers_windows() {
+    var cfg = Model.config({ language: "en" })
+    compare(Model.title({ group: "weekly", model: "Pro", window: 86400 }, cfg), "Pro · day")
+    compare(Model.windowName(720 * 3600, cfg), "30-day window")
+    compare(Model.staleText({ error: "expired", tool: "Gemini CLI", cmd: "gemini" }, cfg), "Gemini CLI sign-in expired — run gemini")
   }
 
   function test_contrast_fix() {

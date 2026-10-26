@@ -55,3 +55,8 @@ test("num uses the decimal separator of the language", () => {
   assert.equal(S.num("ru", 7, 0), "7")
   assert.equal(S.num("en", "3.14159", 2), "3.14")
 })
+
+test("the empty-state sentence names the three supported tools", () => {
+  for (const lang of S.LANGS)
+    for (const name of ["Claude Code", "Codex", "Gemini CLI"]) assert.ok(S.TABLES[lang].noProviders.includes(name), `${lang} ${name}`)
+})
