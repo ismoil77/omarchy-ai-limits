@@ -289,10 +289,10 @@ class Renew(Sandbox):
 
 
 class Run(Sandbox):
-  def run_with(self, now=NOW, fetch=None, force=False):
+  def run_with(self, now=NOW, fetch=None, force=False, renew=True):
     fetch = fetch or (lambda access: limit.windows(USAGE))
     with mock.patch.object(limit.time, "time", return_value=now), mock.patch.object(limit, "fetch", fetch):
-      return limit.run(force)
+      return limit.run(force, renew)
 
   def windows_future(self):
     return [{"key": "five_hour", "group": "session", "model": "", "util": 20.0,
@@ -333,6 +333,21 @@ class Run(Sandbox):
     with mock.patch.object(limit.urllib.request, "urlopen", side_effect=http_error(401)):
       out = self.run_with()
     self.assertEqual((out["ok"], out["error"]), (False, "expired"))
+
+  def test_without_renew_the_login_file_is_never_touched(self):
+    path = self.login(expires_in=-100)
+    before = path.read_text()
+    with mock.patch.object(limit.urllib.request, "urlopen", side_effect=AssertionError("no request")):
+      out = self.run_with(renew=False)
+    self.assertEqual((out["ok"], out["error"]), (False, "expired"))
+    self.assertEqual(path.read_text(), before)
+
+  def test_without_renew_a_rejected_token_is_expired_not_renewed(self):
+    path = self.login(access="dead", expires_in=3600)
+    before = path.read_text()
+    out = self.run_with(renew=False, fetch=lambda a: (_ for _ in ()).throw(http_error(401)))
+    self.assertEqual(out["error"], "expired")
+    self.assertEqual(path.read_text(), before)
 
   def test_401_from_usage_renews_once_and_retries(self):
     self.login(access="dead", expires_in=3600)
@@ -410,6 +425,12 @@ class Cli(Sandbox):
          mock.patch.object(urllib.request, "urlopen", lambda *a, **k: FakeResponse({"limits": []})):
       runpy.run_path(limit.__file__, run_name="__main__")
     self.assertEqual(json.loads(out.getvalue())["windows"], [])
+
+  def test_flags_reach_run(self):
+    for argv, want in (([], (False, False)), (["--force"], (True, False)), (["--renew"], (False, True)), (["--force", "--renew"], (True, True))):
+      with mock.patch.object(limit, "run", return_value={}) as run, mock.patch("sys.stdout", io.StringIO()):
+        limit.main(argv)
+      run.assert_called_once_with(*[want[0]], renew=want[1])
 
 
 if __name__ == "__main__":

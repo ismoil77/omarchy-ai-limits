@@ -20,9 +20,10 @@ Each run prints one JSON object:
                       a prior, refined by paired fetches
   ratioSpan  float    5-hour points that ratio is learned from
 
-An expired access token is renewed here, the way Claude Code itself does it
-(refresh token → new pair, written back to ~/.claude/.credentials.json), so
-the widget keeps working when no Claude Code session is running.
+With --renew, an expired access token is renewed here the way Claude Code
+itself does it (refresh token → new pair, written back to
+~/.claude/.credentials.json), so the widget keeps working when no Claude Code
+session is running. Without the flag the login file is never written.
 
 Every good answer is kept as a sample, so the burn rate is measured on the
 server's own numbers over the last half hour, whichever device did the work.
@@ -304,7 +305,7 @@ def renewed(state, now, used=""):
   return access, ""
 
 
-def run(force):
+def run(force, renew=False):
   CACHE_DIR.mkdir(parents=True, exist_ok=True)
   now = time.time()
   with open(CACHE_DIR / "lock", "w") as lock:
@@ -323,7 +324,7 @@ def run(force):
     else:
       access, expires = token()
       if access and expires and expires <= now + REFRESH_MARGIN:
-        access, error = renewed(state, now)
+        access, error = renewed(state, now) if renew else ("", "expired")
       if not access and not error:
         error = "auth"
       if access and not error:
@@ -334,7 +335,7 @@ def run(force):
             if e.code not in (401, 403):
               raise
             # Dead before its time (signed out elsewhere?): one renewal, one retry.
-            access, error = renewed(state, now, used=access)
+            access, error = renewed(state, now, used=access) if renew else ("", "expired")
             if error:
               found = None
             else:
@@ -381,5 +382,9 @@ def run(force):
   }
 
 
+def main(argv):
+  print(json.dumps(run("--force" in argv, renew="--renew" in argv)))
+
+
 if __name__ == "__main__":
-  print(json.dumps(run("--force" in sys.argv[1:])))
+  main(sys.argv[1:])

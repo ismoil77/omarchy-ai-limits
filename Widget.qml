@@ -135,7 +135,11 @@ Panel {
       if (force) pendingForce = true
       return
     }
-    proc.command = force ? ["python3", "-I", script, "--force"] : ["python3", "-I", script]
+    var args = ["python3", "-I", script]
+    if (force) args.push("--force")
+    // Off by default: renewing rewrites Claude Code's login file, so the user opts in.
+    if (setting("renewLogin", false) === true) args.push("--renew")
+    proc.command = args
     proc.running = true
     colorsFile.reload()
   }

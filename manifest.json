@@ -25,7 +25,8 @@
       "clock": "24-hour",
       "workFrom": 8,
       "workTo": 23,
-      "animations": true
+      "animations": true,
+      "renewLogin": false
     },
     "schema": [
       {
@@ -78,6 +79,12 @@
         "type": "boolean",
         "label": "Animations",
         "description": "Turn off to stop the meters from sliding."
+      },
+      {
+        "key": "renewLogin",
+        "type": "boolean",
+        "label": "Renew the Claude login when it expires",
+        "description": "Off by default. When on, an expired token is renewed the way Claude Code does it and written back to ~/.claude/.credentials.json. When off, the widget waits until you run claude."
       },
       {
         "key": "interval",

@@ -41,7 +41,7 @@ Click opens the popup, right click refreshes.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/<you>/omarchy-claude-limit.git --enable
+omarchy plugin add https://github.com/ismoil77/omarchy-claude-limit.git --enable
 ```
 
 (or copy the folder to `~/.config/omarchy/plugins/ismoil.claude-limit/`, run
@@ -69,6 +69,7 @@ bar settings:
 | `workFrom`, `workTo` | `8`, `23` | Hours of your local day you use Claude. The week's pace is counted over these hours only, so nights don't make you look slow. `0`–`24` for round the clock |
 | `clock` | `24-hour` | or `12-hour` |
 | `animations` | `true` | `false` stops the meters from sliding |
+| `renewLogin` | `false` | `true`: renew an expired Claude login by itself (see Privacy) |
 | `interval` | `60` | refresh seconds (at least 45) |
 
 ## Privacy and what it touches
@@ -77,11 +78,14 @@ Read this: the widget handles your Claude login.
 
 - It reads `~/.claude/.credentials.json` (or `$CLAUDE_CONFIG_DIR`) and sends the
   access token **only** to `https://api.anthropic.com/api/oauth/usage`.
-- **When the access token has expired** (or is rejected) it renews it the way Claude
-  Code does: the refresh token goes **only** to `https://platform.claude.com/v1/oauth/token`,
-  and the new token pair is written back to `.credentials.json` (atomically, same
-  permissions, other keys kept). This replaces the old behaviour of waiting for you to
-  run `claude`. If a renewal fails it is not retried for 10 minutes.
+- **Off by default: the login file is never written.** When the access token expires the
+  widget shows "sign-in expired — run claude" and waits until Claude Code refreshes it.
+- **Opt-in `renewLogin: true`.** Then, when the access token has expired (or is rejected), it
+  renews it the way Claude Code does: the refresh token goes **only** to
+  `https://platform.claude.com/v1/oauth/token`, and the new token pair is written back to
+  `.credentials.json` (atomically, same permissions, other keys kept). A failed renewal is
+  not retried for 10 minutes. Because the refresh token rotates, a Claude Code session that
+  was already running may need `claude` restarted once if it had cached the old pair.
 - Nothing else leaves your machine. Cached numbers live in `~/.cache/ismoil-claude-limit/`.
 
 ## How the colours are decided
