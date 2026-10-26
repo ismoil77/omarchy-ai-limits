@@ -1,0 +1,156 @@
+{
+ "catppuccin-latte": {
+  "background": "#eff1f5",
+  "foreground": "#4c4f69",
+  "red": "#d20f39",
+  "yellow": "#df8e1d",
+  "green": "#40a02b"
+ },
+ "catppuccin": {
+  "background": "#1e1e2e",
+  "foreground": "#cdd6f4",
+  "red": "#f38ba8",
+  "yellow": "#f9e2af",
+  "green": "#a6e3a1"
+ },
+ "ethereal": {
+  "background": "#060b1e",
+  "foreground": "#ffcead",
+  "red": "#ed5b5a",
+  "yellow": "#e9bb4f",
+  "green": "#92a593"
+ },
+ "everforest": {
+  "background": "#2d353b",
+  "foreground": "#d3c6aa",
+  "red": "#e67e80",
+  "yellow": "#dbbc7f",
+  "green": "#a7c080"
+ },
+ "flexoki-light": {
+  "background": "#fffcf0",
+  "foreground": "#100f0f",
+  "red": "#d14d41",
+  "yellow": "#d0a215",
+  "green": "#879a39"
+ },
+ "gruvbox": {
+  "background": "#282828",
+  "foreground": "#d4be98",
+  "red": "#ea6962",
+  "yellow": "#d8a657",
+  "green": "#a9b665"
+ },
+ "hackerman": {
+  "background": "#0b0c16",
+  "foreground": "#ddf7ff",
+  "red": "#50f872",
+  "yellow": "#50f7d4",
+  "green": "#4fe88f"
+ },
+ "kanagawa": {
+  "background": "#1f1f28",
+  "foreground": "#dcd7ba",
+  "red": "#c34043",
+  "yellow": "#c0a36e",
+  "green": "#76946a"
+ },
+ "last-horizon": {
+  "background": "#0c0b0c",
+  "foreground": "#fafcfb",
+  "red": "#c38b7b",
+  "yellow": "#6b5e73",
+  "green": "#87a9b0"
+ },
+ "lumon": {
+  "background": "#16242d",
+  "foreground": "#d6e2ee",
+  "red": "#4d86b0",
+  "yellow": "#6fa4c9",
+  "green": "#5e95bc"
+ },
+ "lupine": {
+  "background": "#fafafa",
+  "foreground": "#212121",
+  "red": "#c900c4",
+  "yellow": "#026fde",
+  "green": "#4a2fd0"
+ },
+ "matte-black": {
+  "background": "#121212",
+  "foreground": "#bebebe",
+  "red": "#d35f5f",
+  "yellow": "#b91c1c",
+  "green": "#ffc107"
+ },
+ "miasma": {
+  "background": "#222222",
+  "foreground": "#c2c2b0",
+  "red": "#685742",
+  "yellow": "#b36d43",
+  "green": "#5f875f"
+ },
+ "nord": {
+  "background": "#2e3440",
+  "foreground": "#d8dee9",
+  "red": "#bf616a",
+  "yellow": "#ebcb8b",
+  "green": "#a3be8c"
+ },
+ "osaka-jade": {
+  "background": "#111c18",
+  "foreground": "#c1c497",
+  "red": "#ff5345",
+  "yellow": "#459451",
+  "green": "#549e6a"
+ },
+ "retro-82": {
+  "background": "#05182e",
+  "foreground": "#f6dcac",
+  "red": "#f85525",
+  "yellow": "#e97b3c",
+  "green": "#028391"
+ },
+ "ristretto": {
+  "background": "#2c2525",
+  "foreground": "#e6d9db",
+  "red": "#fd6883",
+  "yellow": "#f9cc6c",
+  "green": "#adda78"
+ },
+ "rose-pine": {
+  "background": "#faf4ed",
+  "foreground": "#575279",
+  "red": "#b4637a",
+  "yellow": "#ea9d34",
+  "green": "#286983"
+ },
+ "solitude": {
+  "background": "#101315",
+  "foreground": "#cacccc",
+  "red": "#565d60",
+  "yellow": "#d9dbdc",
+  "green": "#9fa5a9"
+ },
+ "tokyo-night": {
+  "background": "#1a1b26",
+  "foreground": "#a9b1d6",
+  "red": "#f7768e",
+  "yellow": "#e0af68",
+  "green": "#9ece6a"
+ },
+ "vantablack": {
+  "background": "#000000",
+  "foreground": "#ffffff",
+  "red": "#a4a4a4",
+  "yellow": "#cecece",
+  "green": "#b6b6b6"
+ },
+ "white": {
+  "background": "#ffffff",
+  "foreground": "#000000",
+  "red": "#2a2a2a",
+  "yellow": "#4a4a4a",
+  "green": "#3a3a3a"
+ }
+}

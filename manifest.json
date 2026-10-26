@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "id": "ismoil.claude-limit",
+  "name": "Claude limit",
+  "version": "2.0.0",
+  "author": "ismoil",
+  "license": "MIT",
+  "description": "Claude usage limits in the bar, readable for low vision: the 5-hour window and the week with plain-language verdicts, a pace meter, forecast and a weekly-share ceiling. English and Russian, large-text mode, WCAG AA contrast.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Claude limit",
+    "description": "5-hour limit in the bar; popup with the week and model limits, pace and forecast",
+    "category": "AI",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "interval": 60,
+      "language": "auto",
+      "textSize": "Normal",
+      "clock": "24-hour",
+      "workFrom": 8,
+      "workTo": 23,
+      "animations": true
+    },
+    "schema": [
+      {
+        "key": "language",
+        "type": "enum",
+        "label": "Language",
+        "options": [
+          "auto",
+          "en",
+          "ru"
+        ],
+        "defaultValue": "auto",
+        "description": "auto follows the system locale (Russian or English)."
+      },
+      {
+        "key": "textSize",
+        "type": "enum",
+        "label": "Text size",
+        "options": [
+          "Normal",
+          "Large",
+          "Extra large"
+        ],
+        "defaultValue": "Normal",
+        "description": "Scales the popup text and the bar text. Text is never smaller than 13 px."
+      },
+      {
+        "key": "workFrom",
+        "type": "number",
+        "label": "Active hours: from (0-23)",
+        "description": "The week's pace is counted over the hours you actually use Claude."
+      },
+      {
+        "key": "workTo",
+        "type": "number",
+        "label": "Active hours: to (1-24)"
+      },
+      {
+        "key": "clock",
+        "type": "enum",
+        "label": "Clock",
+        "options": [
+          "24-hour",
+          "12-hour"
+        ],
+        "defaultValue": "24-hour"
+      },
+      {
+        "key": "animations",
+        "type": "boolean",
+        "label": "Animations",
+        "description": "Turn off to stop the meters from sliding."
+      },
+      {
+        "key": "interval",
+        "type": "number",
+        "label": "Refresh interval (seconds, at least 45)"
+      }
+    ]
+  }
+}

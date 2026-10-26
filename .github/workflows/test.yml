@@ -1,0 +1,25 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Python (limit.py)
+        run: python3 -I -W ignore::ResourceWarning -m unittest discover -s tests -p "test_*.py"
+      - name: Node (Model.js, Strings.js, Contrast.js)
+        run: node --test tests/*.test.mjs
+      - name: Manifest sanity
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          m = json.loads(pathlib.Path("manifest.json").read_text())
+          assert m["schemaVersion"] == 1 and not m["id"].startswith("omarchy.")
+          for f in m["entryPoints"].values():
+              assert pathlib.Path(f).is_file(), f
+          assert pathlib.Path("LICENSE").is_file()
+          PY
