@@ -4,7 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
-import "Contrast.js" as Contrast
+import "kit/Contrast.js" as Contrast
 import "Strings.js" as Strings
 
 // AI usage limits: Claude, Codex and Gemini, whichever are set up on this

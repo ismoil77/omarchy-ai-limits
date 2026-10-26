@@ -11,7 +11,7 @@ jobs:
         with: { python-version: "3.12" }
       - name: Python (limit.py)
         run: python3 -I -W ignore::ResourceWarning -m unittest discover -s tests -p "test_*.py"
-      - name: Node (Model.js, Strings.js, Contrast.js)
+      - name: Node (Model.js, Strings.js, kit)
         run: node --test tests/*.test.mjs
       - name: Manifest sanity
         run: |

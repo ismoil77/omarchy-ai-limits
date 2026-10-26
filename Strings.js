@@ -1,4 +1,5 @@
 .pragma library
+.import "kit/I18n.js" as I18n
 
 // Every user-visible word of the widget, in each supported language.
 // {name} placeholders are filled by t(); tests keep both tables in step.
@@ -184,28 +185,14 @@ var LANGS = ["en", "ru"]
 
 // "auto" follows the system locale (ru_RU.UTF-8 → ru); anything unknown is English.
 function resolve(setting, locale) {
-  var s = String(setting || "auto").toLowerCase()
-  if (LANGS.indexOf(s) >= 0) return s
-  if (s === "русский") return "ru"
-  if (s === "english") return "en"
-  var l = String(locale || "").toLowerCase()
-  for (var i = 0; i < LANGS.length; i++)
-    if (l === LANGS[i] || l.indexOf(LANGS[i] + "_") === 0 || l.indexOf(LANGS[i] + "-") === 0) return LANGS[i]
-  return "en"
+  return I18n.resolve(setting, locale, LANGS, { "русский": "ru", english: "en" })
 }
 
 function t(lang, key, params) {
-  var table = TABLES[lang] || en
-  var text = table[key]
-  if (text === undefined) text = en[key]
-  if (text === undefined) return key
-  return text.replace(/\{(\w+)\}/g, function(m, name) {
-    return params && params[name] !== undefined ? params[name] : m
-  })
+  return I18n.t(TABLES, lang, key, params)
 }
 
 // 7.2 → "7.2" in English, "7,2" in Russian.
 function num(lang, n, digits) {
-  var s = Number(n).toFixed(digits === undefined ? 0 : digits)
-  return lang === "ru" ? s.replace(".", ",") : s
+  return I18n.num(lang, n, digits)
 }

@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 echo "== python: limit.py"
 python3 -I -W ignore::ResourceWarning -m unittest discover -s tests -p "test_*.py"
 
-echo "== node: Model.js, Strings.js, Contrast.js"
+echo "== node: Model.js, Strings.js, kit/Contrast.js, kit/I18n.js"
 node --test tests/*.test.mjs
 
 # The Qt 6 runner: qmltestrunner6 (Debian/Ubuntu) or qt6/bin (Arch, where plain qmltestrunner is Qt 5).

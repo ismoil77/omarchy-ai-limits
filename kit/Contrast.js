@@ -47,6 +47,13 @@ function over(fg, alpha, bg) {
   return mix(bg, fg, alpha)
 }
 
+// A colour that may be translucent (#aarrggbb) laid over an opaque `under`,
+// as an opaque colour: contrast can only be judged on what is actually seen.
+function flatten(c, under) {
+  var p = parse(c)
+  return p.a >= 1 ? hex(p) : mix(under, hex(p), p.a)
+}
+
 // `fg` itself when it already reads on `bg`; otherwise the closest shade of
 // it, darkened or lightened, that reaches `min` (4.5 text, 3 graphics).
 function ensure(fg, bg, min) {

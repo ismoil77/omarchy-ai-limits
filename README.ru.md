@@ -125,7 +125,8 @@ tests/run.sh      # Python, Node, QML-движок Qt и `omarchy plugin validat
 ```
 
 `limit.py` — слой данных (по загрузчику на каждый ИИ, у каждого свой файл состояния), `Model.js` —
-расчёты темпа и все фразы, `Strings.js` — тексты en/ru, `Contrast.js` — подгонка цветов. Последние
+расчёты темпа и все фразы, `Strings.js` — тексты en/ru, `kit/` — общая подгонка цветов и помощники перевода (копия
+[omarchy-widget-kit](https://github.com/ismoil77/omarchy-widget-kit)). Последние
 три — чистые функции, их используют и виджет, и тесты. Набор тестов на Qt 6 `qmltestrunner`
 пропускается, если его нет. После правок QML запускайте `omarchy restart shell` — горячая
 перезагрузка иногда оставляет старый виджет.

@@ -2,7 +2,7 @@ import QtQuick
 import QtTest
 import "../Model.js" as Model
 import "../Strings.js" as Strings
-import "../Contrast.js" as Contrast
+import "../kit/Contrast.js" as Contrast
 
 // The same libraries the widget imports, run by Qt's own JavaScript engine:
 // a syntax Node accepts but QML does not would fail here.

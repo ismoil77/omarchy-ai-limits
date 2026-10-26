@@ -130,7 +130,8 @@ tests/run.sh      # Python, Node, Qt's QML engine, and `omarchy plugin validate`
 ```
 
 `limit.py` is the data layer (one fetcher per AI, one state file each), `Model.js` the pace
-maths and every sentence, `Strings.js` the en/ru text, `Contrast.js` the colour fixing. The last
+maths and every sentence, `Strings.js` the en/ru text, `kit/` the shared colour fixing and translation helpers (a copy of
+[omarchy-widget-kit](https://github.com/ismoil77/omarchy-widget-kit)). The last
 three are pure functions loaded both by the widget and by the tests. The Qt 6 `qmltestrunner` suite is
 skipped if it isn't installed. After changing QML, run `omarchy restart shell` — hot reload can leave
 a stale widget.

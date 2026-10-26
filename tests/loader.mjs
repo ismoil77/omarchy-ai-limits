@@ -31,4 +31,4 @@ export function load(file, cache = new Map()) {
 
 export const Model = () => load("Model.js")
 export const Strings = () => load("Strings.js")
-export const Contrast = () => load("Contrast.js")
+export const Contrast = () => load("kit/Contrast.js")
