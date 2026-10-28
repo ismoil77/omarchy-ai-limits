@@ -27,8 +27,11 @@ one JSON object:
                         severity, rate (%/h, least-squares over the last
                         30 min, null until 3 samples over 10 min)
     ratio      float    long-window points one point of the session window
-                        costs: a prior, refined by paired fetches
+                        costs: a prior, refined by paired fetches or, for
+                        Claude, by the desktop app's 30-day usage log
     ratioSpan  float    session points that ratio is learned from
+    ratioSource string  "history" (the app's log), "learned" (this widget's
+                        fetches) or "prior" (nothing learned yet)
 
 Flags: --force (shorter cache), --renew (let Claude's expired login be renewed
 and written back to ~/.claude/.credentials.json), --providers a,b (only these),
@@ -95,6 +98,12 @@ CODEX_DEFAULT_MINUTES = {"primary": 300, "secondary": 10080}
 # ---- Gemini
 CLOUDCODE = "https://cloudcode-pa.googleapis.com/v1internal"
 GEMINI_QUOTA_WINDOW = 24 * 3600
+
+# The Claude desktop app logs the account's server-side percents every ~15 min
+# for 30 days: {"samples": [{"t": ms, "org": id, "u": {"fh": 5-hour, "sd": 7-day}}]}.
+# Only the pairs of neighbouring samples that are close in time are used.
+CLAUDE_USAGE_HISTORY = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "Claude" / "plan-usage-history.json"
+HISTORY_MAX_GAP = 30 * 60
 
 CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
 CODEX_DIR = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
@@ -610,6 +619,46 @@ def learn_ratio(state, before, after):
   state["ratio"] = r
 
 
+def claude_history_totals():
+  """(session points, weekly points) the account spent over the app's 30-day
+  log, or None when there is no usable log.
+
+  Each pair of neighbouring samples that are at most HISTORY_MAX_GAP apart
+  adds how far both counters rose; a pair where either fell crosses a reset
+  and is skipped. Summed over a month the whole-percent steps even out, which
+  a few fetches of this widget cannot do."""
+  try:
+    samples = json.loads(CLAUDE_USAGE_HISTORY.read_text())["samples"]
+    org = samples[-1]["org"]
+    series = sorted((s["t"] / 1000, float(s["u"]["fh"]), float(s["u"]["sd"])) for s in samples if s["org"] == org)
+  except Exception:
+    return None
+  ds = dw = 0.0
+  for a, b in zip(series, series[1:]):
+    if b[0] - a[0] > HISTORY_MAX_GAP or b[1] < a[1] or b[2] < a[2]:
+      continue
+    ds += b[1] - a[1]
+    dw += b[2] - a[2]
+  return (ds, dw) if ds > 0 else None
+
+
+# Longer logs than what the widget learned itself, per provider. Codex and
+# Gemini keep none that holds both windows, so they stay on their own samples.
+HISTORIES = {"claude": claude_history_totals}
+
+
+def ratio_inputs(pid, state):
+  """(session points, long-window points, source): the history when it holds
+  more than the widget has learned itself, else what it learned, else nothing."""
+  learned = state.get("ratio") or {}
+  ds, dw = learned.get("ds", 0), learned.get("dw", 0)
+  source = "learned" if ds else "prior"
+  history = HISTORIES.get(pid, lambda: None)()
+  if history and history[0] > ds:
+    ds, dw, source = history[0], history[1], "history"
+  return ds, dw, source
+
+
 # ------------------------------------------------------------------ run
 def poll(pid, now, force, renew_login):
   """One provider: fetch when due, remember samples, return its record."""
@@ -652,7 +701,7 @@ def poll(pid, now, force, renew_login):
       w["util"], w["resetsAt"] = 0.0, None
     w["rate"] = burn_rate(state["samples"], w["key"], now, w["resetsAt"]) if w["resetsAt"] else None
     out.append(w)
-  ratio_state = state.get("ratio") or {}
+  ratio_ds, ratio_dw, ratio_source = ratio_inputs(pid, state)
   return {
     "id": pid,
     **PROVIDERS[pid],
@@ -661,8 +710,9 @@ def poll(pid, now, force, renew_login):
     "fetchedAt": state.get("fetchedAt", 0),
     "plan": state.get("plan") or (claude_plan() if pid == "claude" else ""),
     "windows": out,
-    "ratio": (ratio_state.get("dw", 0) + RATIO_PRIOR * RATIO_PRIOR_SPAN) / (ratio_state.get("ds", 0) + RATIO_PRIOR_SPAN),
-    "ratioSpan": ratio_state.get("ds", 0),
+    "ratio": (ratio_dw + RATIO_PRIOR * RATIO_PRIOR_SPAN) / (ratio_ds + RATIO_PRIOR_SPAN),
+    "ratioSpan": ratio_ds,
+    "ratioSource": ratio_source,
   }
 
 

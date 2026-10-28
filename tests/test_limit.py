@@ -60,6 +60,7 @@ class Sandbox(unittest.TestCase):
       mock.patch.object(limit, "CODEX_DIR", self.codex),
       mock.patch.object(limit, "GEMINI_DIR", self.gemini),
       mock.patch.object(limit, "CACHE_DIR", self.cache),
+      mock.patch.object(limit, "CLAUDE_USAGE_HISTORY", root / "plan-usage-history.json"),
       mock.patch.object(limit, "LEGACY_CACHE_DIR", root / "legacy-cache"),
     ]
     for p in patches:
@@ -426,6 +427,62 @@ class Run(Sandbox):
   def test_output_is_json_serialisable(self):
     self.login()
     json.dumps(limit.run(only=["claude"]))
+
+  def history(self, rows, org="org-1"):
+    """rows: (minutes since the first sample, 5-hour %, 7-day %)."""
+    samples = [{"t": int((NOW + m * 60) * 1000), "org": org, "u": {"fh": fh, "sd": sd, "xu": 0}} for m, fh, sd in rows]
+    limit.CLAUDE_USAGE_HISTORY.write_text(json.dumps({"version": 2, "samples": samples}))
+
+  def test_history_totals_sum_the_rises_between_close_samples(self):
+    self.history([(0, 0, 10), (15, 4, 10), (30, 10, 11), (45, 10, 12)])
+    self.assertEqual(limit.claude_history_totals(), (10.0, 2.0))
+
+  def test_history_skips_resets_and_gaps(self):
+    self.history([(0, 50, 20), (15, 2, 20), (30, 8, 21), (31 + 60, 20, 30), (106, 30, 31)])
+    # (0->15) the 5-hour counter fell, (30->91) too far apart, the rest count
+    self.assertEqual(limit.claude_history_totals(), (16.0, 2.0))
+
+  def test_history_uses_only_the_latest_org(self):
+    limit.CLAUDE_USAGE_HISTORY.write_text(json.dumps({"samples": [
+      {"t": int(NOW * 1000), "org": "old", "u": {"fh": 0, "sd": 0}},
+      {"t": int((NOW + 900) * 1000), "org": "old", "u": {"fh": 50, "sd": 40}},
+      {"t": int((NOW + 1800) * 1000), "org": "new", "u": {"fh": 0, "sd": 0}},
+      {"t": int((NOW + 2700) * 1000), "org": "new", "u": {"fh": 10, "sd": 1}},
+    ]}))
+    self.assertEqual(limit.claude_history_totals(), (10.0, 1.0))
+
+  def test_history_missing_or_broken_is_none(self):
+    self.assertIsNone(limit.claude_history_totals())
+    limit.CLAUDE_USAGE_HISTORY.write_text("{nope")
+    self.assertIsNone(limit.claude_history_totals())
+    limit.CLAUDE_USAGE_HISTORY.write_text(json.dumps({"samples": [{"t": 1, "org": "x"}]}))
+    self.assertIsNone(limit.claude_history_totals())
+    self.history([(0, 5, 5), (15, 5, 5)])
+    self.assertIsNone(limit.claude_history_totals())
+
+  def test_ratio_follows_the_history_when_it_holds_more(self):
+    self.login()
+    self.history([(0, 0, 0), (15, 100, 14)])
+    out = self.run_with(fetch=lambda a: self.windows_future())
+    self.assertEqual((out["ratioSource"], out["ratioSpan"]), ("history", 100.0))
+    self.assertAlmostEqual(out["ratio"], (14 + limit.RATIO_PRIOR * limit.RATIO_PRIOR_SPAN) / (100 + limit.RATIO_PRIOR_SPAN))
+
+  def test_ratio_keeps_the_widgets_own_when_it_has_learned_more(self):
+    self.login()
+    self.history([(0, 0, 0), (15, 10, 5)])
+    (self.cache.parent / "legacy-cache").mkdir()
+    (self.cache.parent / "legacy-cache" / "state.json").write_text(json.dumps({"ratio": {"ds": 100.0, "dw": 20.0}}))
+    out = self.run_with(fetch=lambda a: self.windows_future())
+    self.assertEqual((out["ratioSource"], out["ratioSpan"]), ("learned", 100.0))
+
+  def test_ratio_source_is_prior_without_any_data(self):
+    self.login()
+    self.assertEqual(self.run_with(fetch=lambda a: self.windows_future())["ratioSource"], "prior")
+
+  def test_other_providers_never_read_the_claude_history(self):
+    self.history([(0, 0, 0), (15, 100, 14)])
+    self.assertEqual(limit.ratio_inputs("codex", {}), (0, 0, "prior"))
+    self.assertEqual(limit.ratio_inputs("gemini", {"ratio": {"ds": 4, "dw": 1}}), (4, 1, "learned"))
 
   def test_legacy_state_is_carried_over(self):
     self.login()

@@ -96,6 +96,9 @@ rm -rf ~/.cache/ismoil-ai-limits      # кэш цифр, по желанию
 
 - **Claude:** читает `~/.claude/.credentials.json` (или `$CLAUDE_CONFIG_DIR`) и отправляет токен
   доступа **только** на `https://api.anthropic.com/api/oauth/usage`.
+- **Журнал использования десктопного Claude:** если есть `~/.config/Claude/plan-usage-history.json`
+  (`$XDG_CONFIG_HOME/Claude/`), он читается (никогда не пишется) и только ради записанных там процентов
+  5-часового и недельного окон. Никуда не отправляется.
 - **Codex:** токены Codex виджет не читает. Он запускает `codex app-server` (только чтение, как это
   делает встроенная панель агентов Omarchy) и спрашивает у него лимиты; вход Codex ведёт сам.
 - **Gemini:** читает токен доступа из `~/.gemini/oauth_creds.json` и отправляет его **только** на

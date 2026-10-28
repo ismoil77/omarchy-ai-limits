@@ -44,6 +44,11 @@ Each tool must be signed in with its own CLI. Windows of any length are handled:
 up to 6 hours is paced in clock time, a longer one (a day, a week, 30 days) over your
 active hours.
 
+**Long-term history.** How much of the week one 5-hour window costs (what caps a single
+window so it can't eat the week) is learned from the Claude desktop app's own 30-day usage
+log when it is on this machine, instead of from this widget's few fetches. Codex and Gemini
+keep no such log, so they are paced from what the widget sees, as before.
+
 **Status:** Claude and Codex are used daily and checked against live accounts. Gemini is
 written to the documented API and covered by tests on its response shape, but has not yet
 been confirmed against a live account — please open an issue if its numbers look wrong.
@@ -101,6 +106,9 @@ Read this: the widget handles your AI logins.
 
 - **Claude:** reads `~/.claude/.credentials.json` (or `$CLAUDE_CONFIG_DIR`) and sends the
   access token **only** to `https://api.anthropic.com/api/oauth/usage`.
+- **Claude desktop app's usage log:** when `~/.config/Claude/plan-usage-history.json`
+  (`$XDG_CONFIG_HOME/Claude/`) exists, it is read, never written, only for the account's recorded
+  5-hour and 7-day percents. Nothing from it is sent anywhere.
 - **Codex:** the widget never reads Codex's tokens. It starts `codex app-server` (read-only
   sandbox, as Omarchy's own agents panel does) and asks it for the limits; Codex handles its own login.
 - **Gemini:** reads the access token in `~/.gemini/oauth_creds.json` and sends it **only** to

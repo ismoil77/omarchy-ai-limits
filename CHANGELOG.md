@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.2.0 — long-term history for the pace
+
+- **The 5-hour window's cap on the week now comes from a month of data.** The share of the
+  week one 5-hour window costs (`ratio`) is learned from the Claude desktop app's 30-day
+  usage log (`plan-usage-history.json`, read-only) whenever that holds more than the widget
+  has learned from its own fetches. On the author's account: 1465 session points instead of 261,
+  ratio 0.135. Codex and Gemini have no such log and keep the old calculation.
+- `limit.py` reports `ratioSource`: `history`, `learned` or `prior`.
+- 156 automated tests.
+
 ## 2.1.0 — AI limits
 
 - **Claude, Codex and Gemini.** The widget (renamed from "Claude limit", id `ismoil.ai-limits`)
