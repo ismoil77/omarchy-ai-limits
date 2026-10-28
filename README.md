@@ -75,7 +75,7 @@ Update with `omarchy plugin update ismoil.ai-limits`.
 ## Use
 
 - **Bar:** left click — popup; middle click — next AI; right click — refresh.
-- **Popup:** chips at the top switch AI (click, `h`/`l`, or `1`–`3`); `d` toggles details;
+- **Popup:** chips at the top switch AI (click, `h`/`l`, or `1`–`9`); `d` toggles details;
   `r` refreshes; `Esc` closes. IPC: `omarchy-shell ismoil.ai-limits next|previous|select <id>|refresh|toggle`.
 
 ## Remove
@@ -83,6 +83,7 @@ Update with `omarchy plugin update ismoil.ai-limits`.
 ```bash
 omarchy plugin remove ismoil.ai-limits
 rm -rf ~/.cache/ismoil-ai-limits      # cached numbers, optional
+rm -rf ~/.cache/ismoil-claude-limit   # only if an older version left it
 ```
 
 ## Settings
@@ -94,11 +95,11 @@ Set in the widget's entry in `~/.config/omarchy/shell.json`, or in the shell's b
 | `providers` | `all` | `all`, or a list such as `claude,codex` |
 | `language` | `auto` | `auto`, `en`, `ru` |
 | `textSize` | `Normal` | `Normal`, `Large`, `Extra large` — scales popup and bar text |
-| `workFrom`, `workTo` | `8`, `23` | Hours of your local day you use AI. Windows of a day or more are paced over these hours only, so nights don't make you look slow. `0`–`24` for round the clock |
+| `workFrom`, `workTo` | `8`, `23` | Hours of your local day you use AI. Windows of a day or more are paced over these hours only, so nights don't make you look slow. `workFrom` 0–23, `workTo` 1–24, and `workTo` must be later than `workFrom`; `0` and `24` is round the clock. Other values fall back to `8` and `23` |
 | `clock` | `24-hour` | or `12-hour` |
 | `animations` | `true` | `false` stops the meters from sliding |
 | `renewLogin` | `false` | `true`: renew an expired **Claude** login by itself (see Privacy) |
-| `interval` | `60` | refresh seconds (at least 45); Codex and Gemini are asked at most every 2 minutes |
+| `interval` | `60` | refresh seconds (at least 45); Codex and Gemini are asked at most every 2 minutes (a manual refresh may ask every 10 seconds) |
 
 ## Privacy and what it touches
 
@@ -122,7 +123,7 @@ Read this: the widget handles your AI logins.
   `.credentials.json` (atomically, same permissions, other keys kept). A failed renewal is not
   retried for 10 minutes. Because the refresh token rotates, a Claude Code session that was already
   running may need `claude` restarted once if it had cached the old pair.
-- Nothing else leaves your machine. Cached numbers live in `~/.cache/ismoil-ai-limits/`.
+- Nothing else leaves your machine. Cached numbers (usage percents, plan name, the AI you picked) live in `~/.cache/ismoil-ai-limits/`; the folder is owner-only (0700) and its files 0600.
 
 ## How the colours are decided
 

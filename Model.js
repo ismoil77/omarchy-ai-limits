@@ -342,6 +342,10 @@ function staleText(info, cfg) {
     : e === "unavailable" ? S.t(lang, "staleUnavailable", who)
     : e === "ratelimit" ? S.t(lang, "staleRate")
     : e === "network" ? S.t(lang, "staleNetwork")
+    : e === "forbidden" ? S.t(lang, "staleForbidden", who)
+    : e === "writefail" ? S.t(lang, "staleWritefail", who)
+    : e === "cache" ? S.t(lang, "staleCache")
+    : e === "internal" ? S.t(lang, "staleInternal")
     : e
 }
 
@@ -355,7 +359,7 @@ function headerText(info, loaded, stale, now, cfg) {
   var parts = []
   if (info.plan) parts.push(info.plan)
   parts.push(info.fetchedAt > 0 ? S.t(cfg.lang, "updated", { time: when(info.fetchedAt, now, cfg) }) : S.t(cfg.lang, "noData"))
-  if (stale) parts.push(staleText(info, cfg))
+  if (stale) parts.push(staleText(info, cfg) || S.t(cfg.lang, "staleStopped"))
   return parts.join(" · ")
 }
 

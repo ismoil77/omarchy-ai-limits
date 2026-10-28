@@ -16,8 +16,9 @@ one JSON object:
     id, name, tool, cmd   "claude", "Claude", "Claude Code", "claude"
     ok         bool     the numbers are current: fetched without error, or
                         within the last 5 minutes
-    error      string   "", "auth", "expired", "ratelimit", "network",
-                        "unavailable", "http <n>"
+    error      string   "", "auth", "expired", "forbidden", "writefail",
+                        "ratelimit", "network", "unavailable", "cache",
+                        "internal", "http <n>"
     fetchedAt  float    unix seconds of the last good answer
     plan       string   "Max 5x", "Plus", "Standard", ...
     windows    list     key, group ("session" up to 6 h, "weekly" for any
@@ -126,18 +127,68 @@ def state_path(pid):
   return CACHE_DIR / f"state-{pid}.json"
 
 
+def is_number(value):
+  return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def clean_samples(raw):
+  """[time, util, resetsAt] triples per window key; anything else is dropped."""
+  out = {}
+  if not isinstance(raw, dict):
+    return out
+  for key, series in raw.items():
+    if not isinstance(series, list):
+      continue
+    good = [s for s in series if isinstance(s, list) and len(s) == 3
+            and is_number(s[0]) and is_number(s[1]) and (s[2] is None or is_number(s[2]))]
+    if good:
+      out[key] = good
+  return out
+
+
 def load_state(pid):
+  """The saved state, or {} when the file is missing, damaged or not an object.
+  Fields the run does arithmetic on are checked, so one bad value cannot
+  crash the whole run."""
   try:
-    return json.loads(state_path(pid).read_text())
+    state = json.loads(state_path(pid).read_text())
   except Exception:
     return {}
+  if not isinstance(state, dict):
+    return {}
+  for key in ("fetchedAt", "triedAt", "backoffUntil", "renewRetryAt"):
+    if key in state and not is_number(state[key]):
+      del state[key]
+  found = state.get("windows")
+  if not isinstance(found, list) or not all(
+      isinstance(w, dict) and is_number(w.get("util")) and is_number(w.get("window"))
+      and (w.get("resetsAt") is None or is_number(w.get("resetsAt"))) and isinstance(w.get("key"), str)
+      for w in found):
+    state.pop("windows", None)
+  state["samples"] = clean_samples(state.get("samples"))
+  return state
+
+
+def make_cache_dir():
+  """The cache holds usage and account data: owner-only, whatever the umask
+  and whatever an older version left behind."""
+  CACHE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+  os.chmod(CACHE_DIR, 0o700)
+
+
+def write_private(path, text):
+  """Write atomically into a file only the owner can read."""
+  tmp = path.with_name(path.name + ".tmp")
+  fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+  with os.fdopen(fd, "w") as f:
+    # A leftover .tmp keeps the mode it was made with: set it, do not trust O_CREAT.
+    os.fchmod(f.fileno(), 0o600)
+    f.write(text)
+  tmp.replace(path)
 
 
 def save_state(pid, state):
-  path = state_path(pid)
-  tmp = path.with_suffix(".tmp")
-  tmp.write_text(json.dumps(state))
-  tmp.replace(path)
+  write_private(state_path(pid), json.dumps(state))
 
 
 def migrate_legacy():
@@ -145,11 +196,18 @@ def migrate_legacy():
   keep its samples and the learned weekly ratio."""
   old = LEGACY_CACHE_DIR / "state.json"
   new = state_path("claude")
-  if old.exists() and not new.exists() and LEGACY_CACHE_DIR != CACHE_DIR:
-    try:
-      new.write_text(old.read_text())
-    except OSError:
-      pass
+  if LEGACY_CACHE_DIR == CACHE_DIR or not old.exists():
+    return
+  try:
+    # Older versions wrote it under the default umask: close it.
+    os.chmod(LEGACY_CACHE_DIR, 0o700)
+    for f in LEGACY_CACHE_DIR.iterdir():
+      if f.is_file():
+        os.chmod(f, 0o600)
+    if not new.exists():
+      write_private(new, old.read_text())
+  except OSError:
+    pass
 
 
 def selected_path():
@@ -166,8 +224,8 @@ def read_selected():
 def write_selected(pid):
   if pid not in PROVIDERS:
     return
-  CACHE_DIR.mkdir(parents=True, exist_ok=True)
-  selected_path().write_text(pid)
+  make_cache_dir()
+  write_private(selected_path(), pid)
 
 
 def parse_time(value):
@@ -195,8 +253,10 @@ def http_failure(e):
   if e.code == 429:
     retry = e.headers.get("retry-after") if e.headers else None
     return Failure("ratelimit", int(retry) if retry and retry.isdigit() else None)
-  if e.code in (401, 403):
+  if e.code == 401:
     return Failure("expired")
+  if e.code == 403:
+    return Failure("forbidden")
   return Failure(f"http {e.code}")
 
 
@@ -213,10 +273,21 @@ def token():
   return str(login.get("accessToken") or ""), float(login.get("expiresAt") or 0) / 1000
 
 
-def save_login(whole, login):
-  """Write the credentials file back atomically, keeping its mode and every
-  other key it holds."""
-  path = credentials_path()
+def save_login(login, used_refresh):
+  """Write the new login into the credentials file atomically, keeping its
+  mode, its symlink and every other key it holds.
+
+  The file is read again right before the write: Claude Code may have
+  changed it during the network call. Returns False, writing nothing, when it
+  now holds another refresh token than the one that was traded in."""
+  path = credentials_path().resolve()
+  try:
+    whole = json.loads(path.read_text())
+    current = whole["claudeAiOauth"]
+  except (ValueError, KeyError, TypeError) as e:
+    raise OSError("credentials file unreadable") from e
+  if str(current.get("refreshToken") or "") != used_refresh:
+    return False
   whole["claudeAiOauth"] = login
   tmp = path.with_name(path.name + ".tmp")
   try:
@@ -225,15 +296,17 @@ def save_login(whole, login):
     mode = 0o600
   fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
   with os.fdopen(fd, "w") as f:
+    os.fchmod(f.fileno(), mode)
     json.dump(whole, f)
-  os.chmod(tmp, mode)
   tmp.replace(path)
+  return True
 
 
 def renew(now, used=""):
   """Trade the refresh token for a fresh access token.
 
-  Returns (access, expires_at, error). Claude Code may have renewed in the
+  Returns (access, expires_at, error); "writefail" comes with a usable access
+  token: the new pair is good but could not be stored. Claude Code may have renewed in the
   meantime — the refresh token rotates, so the file is read again first and
   a newer pair found there is used as is, without a second renewal.
   `used` is the access token the caller just found dead.
@@ -280,10 +353,10 @@ def renew(now, used=""):
   if answer.get("scope"):
     login["scopes"] = str(answer["scope"]).split()
   try:
-    save_login(whole, login)
+    save_login(login, refresh)
   except OSError:
     # The new pair is good but could not be stored: use it for this run only.
-    return access, now + expires_in, ""
+    return access, now + expires_in, "writefail"
   return access, now + expires_in, ""
 
 
@@ -293,6 +366,10 @@ def renewed(state, now, used=""):
   if now < state.get("renewRetryAt", 0):
     return "", state.get("renewError") or "expired"
   access, _, error = renew(now, used)
+  if error == "writefail" and access:
+    state["renewRetryAt"] = now + REFRESH_RETRY
+    state["renewError"] = error
+    return access, ""
   if error:
     state["renewRetryAt"] = now + REFRESH_RETRY
     state["renewError"] = error
@@ -381,7 +458,7 @@ def fetch_claude(state, now, renew_login):
   try:
     found = claude_request(access)
   except urllib.error.HTTPError as e:
-    if e.code not in (401, 403):
+    if e.code != 401:
       raise http_failure(e)
     # Dead before its time (signed out elsewhere?): one renewal, one retry.
     access, error = renewed(state, now, used=access) if renew_login else ("", "expired")
@@ -412,23 +489,38 @@ def codex_detected():
 
 
 def rpc_request(proc, request_id, method, params=None, timeout=RPC_TIMEOUT):
+  """Send one request and wait for the reply with the same id.
+
+  Reads the descriptor itself into `proc.rpc_buffer`: select() cannot see what
+  a buffered reader already pulled in, so a reply that arrived together with a
+  notification would look like silence."""
   proc.stdin.write(json.dumps({"id": request_id, "method": method, "params": params or {}}) + "\n")
   proc.stdin.flush()
+  fd = proc.stdout.fileno()
+  buffer = getattr(proc, "rpc_buffer", b"")
   deadline = time.time() + timeout
-  while time.time() < deadline:
-    ready, _, _ = select.select([proc.stdout], [], [], 0.25)
-    if not ready:
-      continue
-    line = proc.stdout.readline()
-    if not line:
-      break
-    try:
-      message = json.loads(line)
-    except Exception:
-      continue
-    if message.get("id") == request_id:
-      return message
-  raise TimeoutError(method)
+  try:
+    while True:
+      while b"\n" in buffer:
+        line, buffer = buffer.split(b"\n", 1)
+        try:
+          message = json.loads(line)
+        except ValueError:
+          continue
+        if isinstance(message, dict) and message.get("id") == request_id:
+          return message
+      left = deadline - time.time()
+      if left <= 0:
+        raise TimeoutError(method)
+      ready, _, _ = select.select([fd], [], [], min(left, 0.25))
+      if not ready:
+        continue
+      chunk = os.read(fd, 65536)
+      if not chunk:
+        raise EOFError(method)
+      buffer += chunk
+  finally:
+    proc.rpc_buffer = buffer
 
 
 def codex_windows(rate_limits):
@@ -469,7 +561,7 @@ def fetch_codex(state, now, renew_login):
     proc.stdin.flush()
     account = rpc_request(proc, 2, "account/read", timeout=4)
     limits = rpc_request(proc, 3, "account/rateLimits/read", timeout=4)
-  except (TimeoutError, OSError, ValueError):
+  except (TimeoutError, EOFError, OSError, ValueError):
     raise Failure("unavailable")
   finally:
     try:
@@ -667,13 +759,16 @@ def poll(pid, now, force, renew_login):
   if not isinstance(samples, dict):
     samples = {}
   error = ""
-  fresh = now - state.get("fetchedAt", 0) < (FORCED_MIN_INTERVAL if force else MIN_INTERVAL[pid])
+  # A failed try counts too, so a persistent error does not start Codex on every poll.
+  last = max(state.get("fetchedAt", 0), state.get("triedAt", 0))
+  fresh = now - last < (FORCED_MIN_INTERVAL if force else MIN_INTERVAL[pid])
 
   if fresh:
     error = state.get("error", "")
   elif now < state.get("backoffUntil", 0):
     error = "ratelimit"
   else:
+    state["triedAt"] = now
     try:
       got = FETCHERS[pid](state, now, renew_login)
       learn_ratio(state, state.get("windows") or [], got["windows"])
@@ -691,7 +786,10 @@ def poll(pid, now, force, renew_login):
   # Keep only what the rate window still needs.
   kept = {k: [s for s in v if now - s[0] <= RATE_SPAN + 600][-200:] for k, v in samples.items()}
   state["samples"] = {k: v for k, v in kept.items() if v}
-  save_state(pid, state)
+  try:
+    save_state(pid, state)
+  except OSError:
+    error = error or "cache"
 
   out = []
   for w in state.get("windows") or []:
@@ -716,14 +814,26 @@ def poll(pid, now, force, renew_login):
   }
 
 
+def poll_safely(pid, now, force, renew_login):
+  """A bug or a broken cache file for one AI must not blank the others."""
+  try:
+    return poll(pid, now, force, renew_login)
+  except Exception:
+    return {
+      "id": pid, **PROVIDERS[pid], "ok": False, "error": "internal", "fetchedAt": 0, "plan": "",
+      "windows": [], "ratio": RATIO_PRIOR, "ratioSpan": 0, "ratioSource": "prior",
+    }
+
+
 def run(force=False, renew=False, only=None):
-  CACHE_DIR.mkdir(parents=True, exist_ok=True)
+  make_cache_dir()
   now = time.time()
-  with open(CACHE_DIR / "lock", "w") as lock:
+  with os.fdopen(os.open(CACHE_DIR / "lock", os.O_WRONLY | os.O_CREAT, 0o600), "w") as lock:
+    os.fchmod(lock.fileno(), 0o600)
     fcntl.flock(lock, fcntl.LOCK_EX)
     migrate_legacy()
     ids = [p for p in PROVIDERS if (only is None or p in only) and DETECTORS[p]()]
-    records = [poll(p, now, force, renew) for p in ids]
+    records = [poll_safely(p, now, force, renew) for p in ids]
     chosen = read_selected()
   selected = chosen if chosen in ids else (ids[0] if ids else "")
   return {"selected": selected, "providers": records}

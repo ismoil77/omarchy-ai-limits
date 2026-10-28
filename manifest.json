@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "ismoil.ai-limits",
   "name": "AI limits",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "author": "ismoil",
   "license": "MIT",
   "description": "Usage limits of the AI tools on this machine — Claude, Codex, Gemini — in the bar, with a switch between them, plain-language verdicts, pace meters and forecasts. Readable for low vision (text scaling, WCAG AA contrast), English and Russian.",
@@ -34,7 +34,8 @@
         "key": "providers",
         "type": "string",
         "label": "AIs to show: all, or a list such as claude,codex,gemini",
-        "description": "Only tools that are signed in on this machine appear. The order in the popup is Claude, Codex, Gemini."
+        "description": "Only tools that are signed in on this machine appear. The order in the popup is Claude, Codex, Gemini.",
+        "defaultValue": "all"
       },
       {
         "key": "language",
@@ -64,12 +65,15 @@
         "key": "workFrom",
         "type": "number",
         "label": "Active hours: from (0-23)",
-        "description": "The week's pace is counted over the hours you actually use Claude."
+        "description": "The week's pace is counted over the hours you actually use AI tools. 0-23; invalid values fall back to 8-23.",
+        "defaultValue": 8
       },
       {
         "key": "workTo",
         "type": "number",
-        "label": "Active hours: to (1-24)"
+        "label": "Active hours: to (1-24)",
+        "description": "Must be later than the start; 0 to 24 is round the clock.",
+        "defaultValue": 23
       },
       {
         "key": "clock",
@@ -85,7 +89,8 @@
         "key": "animations",
         "type": "boolean",
         "label": "Animations",
-        "description": "Turn off to stop the meters from sliding."
+        "description": "Turn off to stop the meters from sliding.",
+        "defaultValue": true
       },
       {
         "key": "renewLogin",
@@ -96,7 +101,8 @@
       {
         "key": "interval",
         "type": "number",
-        "label": "Refresh interval (seconds, at least 45)"
+        "label": "Refresh interval (seconds, at least 45)",
+        "defaultValue": 60
       }
     ]
   }

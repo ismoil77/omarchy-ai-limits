@@ -28,7 +28,7 @@ import "Strings.js" as Strings
 //   left click   - open/close the popup
 //   middle click - next AI
 //   right click  - refresh now
-//   popup        - r refreshes, d details, h/l or 1-3 switch AI, Esc closes,
+//   popup        - r refreshes, d details, h/l or 1-9 switch AI, Esc closes,
 //                  the wheel scrolls
 Panel {
   id: root
@@ -76,8 +76,11 @@ Panel {
 
   // What limit.py last printed: every AI found on this machine.
   property var payload: ({ selected: "", providers: [] })
-  // The AI picked here before limit.py has confirmed it.
+  // The AI picked here before limit.py has confirmed it; cleared once it does.
   property string choice: ""
+  // limit.py crashed, printed nothing or printed rubbish on its last run: the
+  // numbers on screen are then from an earlier run.
+  property bool fetchFailed: false
   readonly property var providers: payload.providers
   readonly property string selectedId: {
     for (var i = 0; i < providers.length; i++) if (providers[i].id === choice) return choice
@@ -98,7 +101,10 @@ Panel {
   // The window the bar shows: the 5-hour one where there is one, else the first.
   readonly property var session: Model.mainWindow(info) || { key: "", group: "session", model: "", util: 0, resetsAt: null, window: 18000, rate: null }
   readonly property var sessionPace: Model.pace(session, now, info, cfg)
-  readonly property bool stale: loaded && !info.ok
+  // Numbers older than three polls mean limit.py is not running at all.
+  readonly property bool outdated: info.fetchedAt > 0 && now - info.fetchedAt > Math.max(3 * pollSeconds, 3 * 120)
+  readonly property bool stale: loaded && (!info.ok || fetchFailed || outdated)
+  readonly property bool hasWindow: Model.mainWindow(info) !== null
   // The 5-hour window owns the bar, but a weekly window that is about to
   // stop you matters more: it shows up beside it while it is yellow or red.
   readonly property var alert: {
@@ -166,8 +172,13 @@ Panel {
       if (next && Array.isArray(next.providers)) {
         payload = next
         loaded = true
+        fetchFailed = false
+        if (choice !== "" && next.selected === choice) choice = ""
+      } else {
+        fetchFailed = true
       }
     } catch (e) {
+      fetchFailed = true
       console.warn("ismoil.ai-limits", "bad output", e)
     }
     now = Date.now() / 1000
@@ -377,7 +388,7 @@ Panel {
 
       // The shape repeats the colour for anyone who cannot tell it apart.
       Text {
-        text: Math.round(root.sessionPace.util) + "%"
+        text: root.hasWindow ? Math.round(root.sessionPace.util) + "%" : "–"
         color: root.barForeground
         font.family: root.fontFamily
         font.pixelSize: root.fsBar
@@ -467,7 +478,7 @@ Panel {
           width: parent.width
           spacing: Style.space(12)
 
-          // ---------- Header: star · Claude / plan, updated · refresh ----------
+          // ---------- Header: the chosen AI's mark, name / plan, updated · refresh ----------
           Item {
             width: parent.width
             implicitHeight: Math.max(heroIcon.implicitHeight, heroLabels.implicitHeight, refreshButton.implicitHeight)

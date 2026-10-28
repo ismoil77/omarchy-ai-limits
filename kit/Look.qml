@@ -7,7 +7,9 @@ import "Contrast.js" as Contrast
 // user's `textSize`, and the animation switch. Components in this folder take
 // a Look instead of a dozen loose properties.
 //
-//   Look { id: look; textSize: setting("textSize", "Normal"); animations: setting("animations", true) !== false }
+//   Look { id: skin; textSize: String(setting("textSize", "Normal")); animations: setting("animations", true) !== false }
+//
+// Do not call the instance `look`: `look: look` binds to itself.
 Item {
   id: look
   visible: false
@@ -18,7 +20,8 @@ Item {
   property string textSize: "Normal"
   property bool animations: true
   property string fontFamily: Style.font.family
-  // The theme's accent as it arrives; `accentText` and `accentFill` are held to contrast.
+  // The theme's accent as it arrives; `accentText`, `accentFill`, `accentSoft`,
+  // `urgentText`, `ink` and `dim` are held to contrast.
   property color accent: Color.accent
   property color urgent: Color.urgent
 

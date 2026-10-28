@@ -346,6 +346,12 @@ test("stale and no-limits texts", () => {
   assert.equal(M.staleText({ error: "auth" }, RU), "нет входа в Claude Code")
   assert.equal(M.staleText({ error: "ratelimit" }, EN), "the server asks to wait")
   assert.equal(M.staleText({ error: "http 500" }, EN), "http 500")
+  assert.equal(M.staleText({ error: "forbidden" }, EN), "Claude Code refused the request (403)")
+  assert.equal(M.staleText({ error: "writefail" }, EN), "Claude Code sign-in could not be saved — run claude")
+  assert.equal(M.staleText({ error: "cache" }, RU), "нельзя писать в папку кэша")
+  assert.equal(M.staleText({ error: "internal" }, EN), "the limits reader failed")
+  // Stale without a recorded error: limit.py itself stopped answering.
+  assert.match(M.headerText({ plan: "", fetchedAt: 0, error: "" }, true, true, 1000, EN), /stopped answering/)
   assert.equal(M.noLimitsText({ error: "network" }, EN), "No limit data: no network")
 })
 

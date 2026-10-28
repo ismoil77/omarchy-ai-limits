@@ -184,6 +184,197 @@ class LearnRatio(unittest.TestCase):
     self.assertAlmostEqual(state["ratio"]["dw"], 15.5)
 
 
+class Private(Sandbox):
+  def test_every_cache_file_is_owner_only_even_over_an_older_open_one(self):
+    self.cache.mkdir(parents=True, exist_ok=True)
+    os.chmod(self.cache, 0o755)
+    old = self.cache / "state-claude.json"
+    old.write_text("{}")
+    os.chmod(old, 0o644)
+    prev = os.umask(0o022)
+    try:
+      limit.make_cache_dir()
+      limit.save_state("claude", {"samples": []})
+      limit.save_state("codex", {})
+      limit.write_selected("codex")
+    finally:
+      os.umask(prev)
+    self.assertEqual(stat.S_IMODE(os.stat(self.cache).st_mode), 0o700)
+    for f in self.cache.iterdir():
+      self.assertEqual(stat.S_IMODE(os.stat(f).st_mode), 0o600, f.name)
+
+
+class Hardening(Sandbox):
+  def test_a_stale_open_tmp_file_and_lock_end_owner_only(self):
+    self.cache.mkdir(parents=True)
+    (self.cache / "state-claude.json.tmp").write_text("old")
+    os.chmod(self.cache / "state-claude.json.tmp", 0o644)
+    (self.cache / "lock").write_text("")
+    os.chmod(self.cache / "lock", 0o644)
+    prev = os.umask(0o022)
+    try:
+      limit.save_state("claude", {})
+      with mock.patch.dict(limit.DETECTORS, {"claude": lambda: False, "codex": lambda: False, "gemini": lambda: False}):
+        limit.run()
+    finally:
+      os.umask(prev)
+    for name in ("state-claude.json", "lock"):
+      self.assertEqual(stat.S_IMODE(os.stat(self.cache / name).st_mode), 0o600, name)
+
+  def test_the_legacy_cache_is_closed_and_migrated(self):
+    legacy = self.cache.parent / "legacy-cache"
+    legacy.mkdir()
+    os.chmod(legacy, 0o755)
+    (legacy / "state.json").write_text('{"ratio": {"ds": 1, "dw": 1}}')
+    os.chmod(legacy / "state.json", 0o644)
+    limit.make_cache_dir()
+    limit.migrate_legacy()
+    self.assertEqual(stat.S_IMODE(os.stat(legacy).st_mode), 0o700)
+    self.assertEqual(stat.S_IMODE(os.stat(legacy / "state.json").st_mode), 0o600)
+    self.assertEqual(limit.load_state("claude")["ratio"], {"ds": 1, "dw": 1})
+
+  def test_tokens_go_only_where_they_belong(self):
+    self.login(access="SENTINEL-ACCESS", refresh="SENTINEL-REFRESH")
+    seen = []
+
+    def urlopen(request, timeout=0):
+      seen.append((request.full_url, dict(request.header_items())))
+      return FakeResponse(USAGE)
+
+    with mock.patch.object(limit.urllib.request, "urlopen", urlopen), mock.patch.object(limit.time, "time", return_value=NOW), \
+         mock.patch.dict(limit.DETECTORS, {"codex": lambda: False, "gemini": lambda: False}):
+      printed = json.dumps(limit.run(force=True))
+    self.assertEqual(len(seen), 1)
+    url, headers = seen[0]
+    self.assertEqual(url, limit.ENDPOINT)
+    self.assertEqual(headers["Authorization"], "Bearer SENTINEL-ACCESS")
+    self.assertEqual(headers["Anthropic-beta"], "oauth-2025-04-20")
+    self.assertNotIn("SENTINEL", printed)
+    for f in self.cache.iterdir():
+      self.assertNotIn("SENTINEL", f.read_text(), f.name)
+
+  def test_codex_is_started_sandboxed_and_silent(self):
+    proc = FakeProc({})
+    rpc = lambda p, request_id, method, params=None, timeout=0: {"id": request_id, "result": {"rateLimits": {}, "account": {}}}
+    with mock.patch.object(limit, "find_codex", return_value="/bin/codex"), \
+         mock.patch.object(limit.subprocess, "Popen", return_value=proc) as popen, \
+         mock.patch.object(limit, "rpc_request", rpc), self.assertRaises(limit.Failure):
+      limit.fetch_codex({}, NOW, False)
+    args, kwargs = popen.call_args
+    self.assertEqual(args[0], ["/bin/codex", "-s", "read-only", "-a", "on-request", "app-server"])
+    self.assertEqual(kwargs["stderr"], limit.subprocess.DEVNULL)
+    self.assertEqual(kwargs["env"]["PATH"], limit.runtime_env()["PATH"])
+
+
+class Damaged(Sandbox):
+  def test_a_corrupt_or_foreign_state_file_gives_an_empty_state(self):
+    self.cache.mkdir(parents=True)
+    for text in ("{garbage", "[1, 2]", "42", "null"):
+      limit.state_path("claude").write_text(text)
+      self.assertEqual(limit.load_state("claude"), {})
+
+  def test_bad_fields_are_dropped_not_trusted(self):
+    self.cache.mkdir(parents=True)
+    limit.state_path("claude").write_text(json.dumps({
+      "fetchedAt": "yesterday", "windows": [{"key": "x"}],
+      "samples": {"a": [[1, 2, 3], [1, 2], "x", [1, "z", None]], "b": "no"}}))
+    state = limit.load_state("claude")
+    self.assertNotIn("fetchedAt", state)
+    self.assertNotIn("windows", state)
+    self.assertEqual(state["samples"], {"a": [[1, 2, 3]]})
+
+  def test_a_broken_state_file_still_returns_a_record(self):
+    self.login()
+    self.cache.mkdir(parents=True)
+    limit.state_path("claude").write_text(json.dumps([1, 2]))
+    with mock.patch.object(limit.urllib.request, "urlopen", lambda *a, **k: FakeResponse(USAGE)), \
+         mock.patch.object(limit.time, "time", return_value=NOW), \
+         mock.patch.dict(limit.DETECTORS, {"codex": lambda: False, "gemini": lambda: False}):
+      out = limit.run(force=True)
+    self.assertTrue(out["providers"][0]["ok"])
+
+  def test_one_failing_provider_does_not_blank_the_others(self):
+    real = limit.poll
+
+    def poll(pid, *a):
+      if pid == "codex":
+        raise ValueError("bug")
+      return real(pid, *a)
+
+    self.login()
+    with mock.patch.object(limit, "poll", poll), mock.patch.object(limit.time, "time", return_value=NOW), \
+         mock.patch.object(limit.urllib.request, "urlopen", lambda *a, **k: FakeResponse(USAGE)), \
+         mock.patch.dict(limit.DETECTORS, {"codex": lambda: True, "gemini": lambda: False}):
+      out = limit.run(force=True)
+    by_id = {p["id"]: p for p in out["providers"]}
+    self.assertEqual(by_id["codex"]["error"], "internal")
+    self.assertTrue(by_id["claude"]["ok"])
+
+  def test_an_unwritable_cache_is_reported_not_fatal(self):
+    self.login()
+    with mock.patch.object(limit, "save_state", side_effect=OSError("full")), mock.patch.object(limit.time, "time", return_value=NOW), \
+         mock.patch.object(limit.urllib.request, "urlopen", lambda *a, **k: FakeResponse(USAGE)):
+      record = limit.poll("claude", NOW, True, False)
+    self.assertEqual(record["error"], "cache")
+
+  def test_a_failed_try_counts_for_the_throttle(self):
+    limit.make_cache_dir()
+    calls = []
+
+    def boom(*a, **k):
+      calls.append(1)
+      raise limit.Failure("unavailable")
+
+    with mock.patch.dict(limit.FETCHERS, {"codex": boom}):
+      limit.poll("codex", NOW, False, False)
+      limit.poll("codex", NOW + 30, False, False)
+      self.assertEqual(len(calls), 1)
+      limit.poll("codex", NOW + 31, True, False)
+      self.assertEqual(len(calls), 2)
+      limit.poll("codex", NOW + 31 + limit.MIN_INTERVAL["codex"], False, False)
+      self.assertEqual(len(calls), 3)
+
+
+class RpcLoop(unittest.TestCase):
+  """rpc_request against a real child process, so select() meets real pipes."""
+
+  def child(self, script):
+    return limit.subprocess.Popen([sys.executable, "-c", script], stdin=limit.subprocess.PIPE,
+                                  stdout=limit.subprocess.PIPE, text=True)
+
+  def tearDown(self):
+    for p in getattr(self, "procs", []):
+      p.kill()
+      p.wait()
+      p.stdin.close()
+      p.stdout.close()
+
+  def start(self, script):
+    proc = self.child(script)
+    self.procs = [proc]
+    return proc
+
+  def test_skips_noise_and_other_ids_and_finds_the_reply_sent_in_one_chunk(self):
+    proc = self.start("import sys,time\n"
+                      "sys.stdout.write('not json\\n{\"method\":\"note\"}\\n{\"id\":9}\\n{\"id\":1,\"result\":{\"a\":1}}\\n{\"id\":2,\"result\":2}\\n')\n"
+                      "sys.stdout.flush()\ntime.sleep(5)\n")
+    self.assertEqual(limit.rpc_request(proc, 1, "m", timeout=3), {"id": 1, "result": {"a": 1}})
+    # The next reply arrived in the same chunk: it must not be lost to select().
+    self.assertEqual(limit.rpc_request(proc, 2, "n", timeout=0.5), {"id": 2, "result": 2})
+
+  def test_end_of_output_is_not_a_timeout(self):
+    proc = self.start("pass")
+    with self.assertRaises(EOFError):
+      limit.rpc_request(proc, 1, "m", timeout=3)
+
+  def test_silence_runs_into_the_deadline(self):
+    proc = self.start("import time\ntime.sleep(5)")
+    started = time.time()
+    with self.assertRaises(TimeoutError):
+      limit.rpc_request(proc, 1, "m", timeout=0.6)
+    self.assertLess(time.time() - started, 3)
+
+
 class Plan(Sandbox):
   def test_names(self):
     self.login()
@@ -281,7 +472,43 @@ class Renew(Sandbox):
     with mock.patch.object(limit.urllib.request, "urlopen", lambda *a, **k: FakeResponse(self.answer())), \
          mock.patch.object(limit, "save_login", side_effect=OSError("read-only")):
       access, _, error = limit.renew(NOW)
+    self.assertEqual((access, error), ("new-access", "writefail"))
+
+  def test_a_lost_pair_is_used_once_then_reported(self):
+    self.login(expires_in=-5)
+    state = {}
+    with mock.patch.object(limit.urllib.request, "urlopen", lambda *a, **k: FakeResponse(self.answer())), \
+         mock.patch.object(limit, "save_login", side_effect=OSError("read-only")):
+      self.assertEqual(limit.renewed(state, NOW), ("new-access", ""))
+      self.assertEqual(limit.renewed(state, NOW + 5), ("", "writefail"))
+
+  def test_does_not_overwrite_a_login_claude_code_rotated_meanwhile(self):
+    path = self.login(expires_in=-5)
+
+    def urlopen(request, timeout=0):
+      # Claude Code renews while our request is in flight.
+      self.login(access="cc-access", refresh="cc-refresh", expires_in=7200)
+      return FakeResponse(self.answer())
+
+    with mock.patch.object(limit.urllib.request, "urlopen", urlopen):
+      access, _, error = limit.renew(NOW)
     self.assertEqual((access, error), ("new-access", ""))
+    self.assertEqual(self.saved()["claudeAiOauth"]["accessToken"], "cc-access")
+    self.assertEqual(self.saved()["claudeAiOauth"]["refreshToken"], "cc-refresh")
+
+  def test_save_login_keeps_the_mode_and_the_symlink(self):
+    for mode in (0o640, 0o400):
+      path = self.login()
+      path.chmod(mode)
+      self.assertTrue(limit.save_login({"accessToken": "a", "refreshToken": "r"}, "old-refresh"))
+      self.assertEqual(stat.S_IMODE(path.stat().st_mode), mode)
+      self.assertEqual(self.saved()["other"], {"keep": "me"})
+    real = self.claude / "real.json"
+    path.replace(real)
+    path.symlink_to(real)
+    self.assertTrue(limit.save_login({"accessToken": "b", "refreshToken": "r2"}, "r"))
+    self.assertTrue(path.is_symlink())
+    self.assertEqual(json.loads(real.read_text())["claudeAiOauth"]["accessToken"], "b")
 
   def test_retry_pause_after_a_failure(self):
     self.login(expires_in=-5)

@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.2.1 — private cache, sturdier reads
+
+- **The cache is owner-only.** `~/.cache/ismoil-ai-limits/` is 0700 and every file in it 0600,
+  whatever the umask and whatever an older version left behind (a stale `.tmp` or `lock` is
+  fixed too); the legacy `ismoil-claude-limit` folder is closed the same way.
+- Renewing the Claude login re-reads the credentials file right before writing, changes only
+  `claudeAiOauth`, writes nothing if Claude Code has rotated the refresh token meanwhile, keeps
+  a symlinked file linked, and reports `writefail` when the new pair could not be stored.
+- Codex: the reply is read from the pipe itself, so a reply that arrives together with a
+  notification is no longer mistaken for silence; end of output is its own failure.
+- HTTP 403 is "refused the request", not "sign-in expired" (and no longer triggers a renewal).
+- A damaged or foreign state file, or one failing provider, no longer blanks the others; the
+  popup says so (`cache`, `internal`). A failed try now counts for the refresh throttle, so a
+  persistent error does not start Codex on every poll.
+- Widget: switching AI on one monitor no longer sticks on another; when `limit.py` crashes or
+  stops answering the numbers are dimmed and say so; the bar shows "–" instead of "0%" when
+  there is no window.
+- 173 automated tests.
+
 ## 2.2.0 — long-term history for the pace
 
 - **The 5-hour window's cap on the week now comes from a month of data.** The share of the

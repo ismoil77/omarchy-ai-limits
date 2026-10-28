@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Commons
 
-// "More 3" / "Less" under a cut list. Hidden while `text` is empty.
+// Toggle text such as "3 more" / "Collapse" under a cut list. Hidden while `text` is empty.
 Text {
   id: more
 

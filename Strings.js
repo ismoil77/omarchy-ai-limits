@@ -83,6 +83,11 @@ var en = {
   staleUnavailable: "{tool} limits are unavailable right now",
   staleRate: "the server asks to wait",
   staleNetwork: "no network",
+  staleForbidden: "{tool} refused the request (403)",
+  staleWritefail: "{tool} sign-in could not be saved — run {cmd}",
+  staleCache: "the cache folder is not writable",
+  staleInternal: "the limits reader failed",
+  staleStopped: "the limits reader stopped answering",
   noLimits: "No limit data: {why}",
   noProviders: "No supported AI tool found. Sign in to Claude Code, Codex or Gemini CLI.",
 
@@ -171,6 +176,11 @@ var ru = {
   staleUnavailable: "лимиты {tool} сейчас недоступны",
   staleRate: "сервер просит подождать",
   staleNetwork: "нет сети",
+  staleForbidden: "{tool} отклонил запрос (403)",
+  staleWritefail: "вход в {tool} не удалось сохранить — запустите {cmd}",
+  staleCache: "нельзя писать в папку кэша",
+  staleInternal: "сбой чтения лимитов",
+  staleStopped: "чтение лимитов не отвечает",
   noLimits: "Нет данных о лимитах: {why}",
   noProviders: "Не найдено ни одного ИИ-инструмента. Войдите в Claude Code, Codex или Gemini CLI.",
 
