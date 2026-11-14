@@ -20,7 +20,9 @@ one JSON object:
                         "ratelimit", "network", "unavailable", "cache",
                         "internal", "http <n>"
     fetchedAt  float    unix seconds of the last good answer
-    plan       string   "Max 5x", "Plus", "Standard", ...
+    plan       string   "Ultra", "Max", "Pro", "Plus", "Standard", ...
+    extra      object   Claude's pay-as-you-go usage past the plan, or null:
+                        used, limit (null = no cap), currency, reached
     windows    list     key, group ("session" up to 6 h, "weekly" for any
                         longer window — a day, a week, a month), model (""
                         or "Fable" / "Pro"), util (0..100), resetsAt (unix s,
@@ -64,7 +66,10 @@ PROVIDERS = {
 # Several bar instances (one per monitor) and the click-to-refresh share one
 # answer; the endpoints rate-limit eager pollers. Codex starts a process per
 # fetch and Gemini's quota moves slowly, so they are asked less often.
-MIN_INTERVAL = {"claude": 45, "codex": 120, "gemini": 120}
+MIN_INTERVAL = {"claude": 120, "codex": 300, "gemini": 300}
+# An AI that is not on the bar is asked this many times less often: Codex then
+# starts its process every 25 minutes instead of every 5.
+UNSELECTED_FACTOR = 5
 FORCED_MIN_INTERVAL = 10
 RATE_SPAN = 30 * 60
 RATE_MIN_SPAN = 10 * 60
@@ -83,6 +88,8 @@ RATIO_CAP = 300
 
 # ---- Claude
 ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
+# Who is asking, honestly: urllib's default agent is the first thing a CDN throttles.
+USER_AGENT = "ismoil-ai-limits/3.0 (+https://github.com/ismoil77/omarchy-ai-limits)"
 # Claude Code's own OAuth client: the same refresh request it sends.
 TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
@@ -107,6 +114,8 @@ CLAUDE_USAGE_HISTORY = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / "
 HISTORY_MAX_GAP = 30 * 60
 
 CLAUDE_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+# The account profile Claude Code refreshes on its own; with CLAUDE_CONFIG_DIR it lives there.
+CLAUDE_PROFILE = (CLAUDE_DIR if os.environ.get("CLAUDE_CONFIG_DIR") else Path.home()) / ".claude.json"
 CODEX_DIR = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
 GEMINI_DIR = Path.home() / ".gemini"
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "ismoil-ai-limits"
@@ -384,10 +393,30 @@ def claude_request(access):
     "Authorization": "Bearer " + access,
     "anthropic-beta": "oauth-2025-04-20",
     "Accept": "application/json",
+    "User-Agent": USER_AGENT,
   })
   with urllib.request.urlopen(request, timeout=10) as response:
     payload = json.loads(response.read().decode("utf-8", "replace"))
-  return windows(payload)
+  return windows(payload), extra_usage(payload)
+
+
+def extra_usage(payload):
+  """Pay-as-you-go usage past the plan, in major units, or None when it is off.
+  Money comes in minor units with `decimal_places` (2 when it is missing, as
+  the dollar-only payloads before it were)."""
+  e = payload.get("extra_usage") if isinstance(payload, dict) else None
+  if not isinstance(e, dict) or not e.get("is_enabled") or not is_number(e.get("used_credits")):
+    return None
+  places = e.get("decimal_places")
+  places = int(places) if is_number(places) and 0 <= places <= 4 else 2
+  scale = 10 ** places
+  limit = e.get("monthly_limit")
+  return {
+    "used": float(e["used_credits"]) / scale,
+    "limit": float(limit) / scale if is_number(limit) else None,
+    "currency": str(e.get("currency") or "USD"),
+    "reached": bool(e.get("spend_limit_reached")),
+  }
 
 
 def windows(payload):
@@ -430,17 +459,35 @@ def windows(payload):
   return out
 
 
+def plan_name(kind, tier):
+  """Since 2026-10-30 Max 20x is called Ultra and Max 5x is called Max; the
+  tier ids did not change."""
+  if "20x" in tier:
+    return "Ultra"
+  if "5x" in tier:
+    return "Max"
+  return kind.replace("claude_", "").replace("_", " ").title()
+
+
 def claude_plan():
+  """The plan as it is now. The profile Claude Code refreshes wins: the login
+  file keeps the plan the account had when it signed in, so an upgrade does
+  not show there."""
+  kind = tier = ""
   try:
-    login = json.loads(credentials_path().read_text())["claudeAiOauth"]
+    account = json.loads(CLAUDE_PROFILE.read_text()).get("oauthAccount") or {}
+    kind = str(account.get("organizationType") or "")
+    tier = str(account.get("organizationRateLimitTier") or "")
   except Exception:
-    return ""
-  kind = str(login.get("subscriptionType") or "").capitalize()
-  tier = str(login.get("rateLimitTier") or "")
-  for mult in ("20x", "5x"):
-    if mult in tier:
-      return f"{kind} {mult}".strip()
-  return kind
+    pass
+  if not tier:
+    try:
+      login = json.loads(credentials_path().read_text())["claudeAiOauth"]
+      kind = kind or str(login.get("subscriptionType") or "")
+      tier = str(login.get("rateLimitTier") or "")
+    except Exception:
+      pass
+  return plan_name(kind, tier)
 
 
 def claude_detected():
@@ -456,7 +503,7 @@ def fetch_claude(state, now, renew_login):
     if error:
       raise Failure(error)
   try:
-    found = claude_request(access)
+    found, extra = claude_request(access)
   except urllib.error.HTTPError as e:
     if e.code != 401:
       raise http_failure(e)
@@ -465,10 +512,10 @@ def fetch_claude(state, now, renew_login):
     if error:
       raise Failure(error)
     try:
-      found = claude_request(access)
+      found, extra = claude_request(access)
     except urllib.error.HTTPError as again:
       raise http_failure(again)
-  return {"windows": found, "plan": claude_plan()}
+  return {"windows": found, "plan": claude_plan(), "extra": extra}
 
 
 # ------------------------------------------------------------------ Codex
@@ -752,8 +799,9 @@ def ratio_inputs(pid, state):
 
 
 # ------------------------------------------------------------------ run
-def poll(pid, now, force, renew_login):
-  """One provider: fetch when due, remember samples, return its record."""
+def poll(pid, now, force, renew_login, shown=True):
+  """One provider: fetch when due, remember samples, return its record.
+  `shown`: it is the AI on the bar; the others are asked less often."""
   state = load_state(pid)
   samples = state.get("samples")
   if not isinstance(samples, dict):
@@ -761,7 +809,7 @@ def poll(pid, now, force, renew_login):
   error = ""
   # A failed try counts too, so a persistent error does not start Codex on every poll.
   last = max(state.get("fetchedAt", 0), state.get("triedAt", 0))
-  fresh = now - last < (FORCED_MIN_INTERVAL if force else MIN_INTERVAL[pid])
+  fresh = now - last < (FORCED_MIN_INTERVAL if force else MIN_INTERVAL[pid] * (1 if shown else UNSELECTED_FACTOR))
 
   if fresh:
     error = state.get("error", "")
@@ -772,7 +820,7 @@ def poll(pid, now, force, renew_login):
     try:
       got = FETCHERS[pid](state, now, renew_login)
       learn_ratio(state, state.get("windows") or [], got["windows"])
-      state.update(windows=got["windows"], fetchedAt=now, plan=got.get("plan", ""))
+      state.update(windows=got["windows"], fetchedAt=now, plan=got.get("plan", ""), extra=got.get("extra"))
       for w in got["windows"]:
         samples.setdefault(w["key"], []).append([now, w["util"], w["resetsAt"]])
     except Failure as f:
@@ -806,7 +854,9 @@ def poll(pid, now, force, renew_login):
     "ok": bool(out) and (error == "" or now - state.get("fetchedAt", 0) < STALE_AFTER),
     "error": error,
     "fetchedAt": state.get("fetchedAt", 0),
-    "plan": state.get("plan") or (claude_plan() if pid == "claude" else ""),
+    # Claude's plan is read fresh: an upgrade shows before the next fetch.
+    "plan": (claude_plan() if pid == "claude" else "") or state.get("plan") or "",
+    "extra": state.get("extra"),
     "windows": out,
     "ratio": (ratio_dw + RATIO_PRIOR * RATIO_PRIOR_SPAN) / (ratio_ds + RATIO_PRIOR_SPAN),
     "ratioSpan": ratio_ds,
@@ -814,14 +864,14 @@ def poll(pid, now, force, renew_login):
   }
 
 
-def poll_safely(pid, now, force, renew_login):
+def poll_safely(pid, now, force, renew_login, shown=True):
   """A bug or a broken cache file for one AI must not blank the others."""
   try:
-    return poll(pid, now, force, renew_login)
+    return poll(pid, now, force, renew_login, shown)
   except Exception:
     return {
       "id": pid, **PROVIDERS[pid], "ok": False, "error": "internal", "fetchedAt": 0, "plan": "",
-      "windows": [], "ratio": RATIO_PRIOR, "ratioSpan": 0, "ratioSource": "prior",
+      "windows": [], "extra": None, "ratio": RATIO_PRIOR, "ratioSpan": 0, "ratioSource": "prior",
     }
 
 
@@ -833,9 +883,10 @@ def run(force=False, renew=False, only=None):
     fcntl.flock(lock, fcntl.LOCK_EX)
     migrate_legacy()
     ids = [p for p in PROVIDERS if (only is None or p in only) and DETECTORS[p]()]
-    records = [poll_safely(p, now, force, renew) for p in ids]
     chosen = read_selected()
-  selected = chosen if chosen in ids else (ids[0] if ids else "")
+    selected = chosen if chosen in ids else (ids[0] if ids else "")
+    # A forced refresh (a click) asks every AI; the timer favours the one on the bar.
+    records = [poll_safely(p, now, force, renew, force or p == selected) for p in ids]
   return {"selected": selected, "providers": records}
 
 

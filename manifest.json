@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "ismoil.ai-limits",
   "name": "AI limits",
-  "version": "2.2.1",
+  "version": "3.0.0",
   "author": "ismoil",
   "license": "MIT",
   "description": "Usage limits of the AI tools on this machine — Claude, Codex, Gemini — in the bar, with a switch between them, plain-language verdicts, pace meters and forecasts. Readable for low vision (text scaling, WCAG AA contrast), English and Russian.",
@@ -19,7 +19,7 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "interval": 60,
+      "interval": 90,
       "language": "auto",
       "textSize": "Normal",
       "clock": "24-hour",
@@ -101,8 +101,9 @@
       {
         "key": "interval",
         "type": "number",
-        "label": "Refresh interval (seconds, at least 45)",
-        "defaultValue": 60
+        "label": "Refresh interval (seconds, at least 60)",
+        "defaultValue": 60,
+        "description": "How often the widget reads the shared cache. Claude is asked at most every 2 minutes, an AI not on the bar every 25 minutes (Codex) — a click asks all of them."
       }
     ]
   }

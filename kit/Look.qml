@@ -54,6 +54,29 @@ Item {
   readonly property color accentSoft: onPopup(Contrast.mix(String(accent), background, 0.45), 3)
   readonly property color urgentText: onPopup(urgent, 4.5)
 
+  // The theme's named colours ({ green: "#..", ... }) from ThemePalette;
+  // without them the levels fall back to the accent, a yellow and `urgent`.
+  property var themeColors: ({})
+  function themed(name, fallback) { return themeColors && themeColors[name] ? themeColors[name] : String(fallback) }
+
+  // Cards: the popup's text faded nearly into its background, a raised
+  // surface on light and dark themes alike.
+  readonly property color surface: Qt.color(Contrast.mix(background, String(Color.popups.text), 0.05))
+  readonly property color surfaceHover: Qt.color(Contrast.mix(background, String(Color.popups.text), 0.10))
+  readonly property real radius: Math.max(6, Style.cornerRadius + 2)
+
+  // Levels: calm / tight / danger, as graphics (3:1) and as text (4.5:1).
+  readonly property color good: onPopup(themed("green", accent), 3)
+  readonly property color goodText: onPopup(themed("green", accent), 4.5)
+  readonly property color warn: onPopup(themed("yellow", "#d0a215"), 3)
+  readonly property color warnText: onPopup(themed("yellow", "#d0a215"), 4.5)
+  readonly property color bad: onPopup(themed("red", urgent), 3)
+  readonly property color badText: onPopup(themed("red", urgent), 4.5)
+  // A named theme colour as a graphic on the popup.
+  function hue(name, fallback) { return onPopup(themed(name, fallback === undefined ? accent : fallback), 3) }
+  function levelFill(level) { return level === "bad" ? bad : level === "warn" ? warn : good }
+  function levelText(level) { return level === "bad" ? badText : level === "warn" ? warnText : goodText }
+
   // `color` adjusted to read on the popup: 4.5 for text, 3 for graphics.
   function onPopup(color, min) {
     return Qt.color(Contrast.ensure(String(color), background, min === undefined ? 4.5 : min))

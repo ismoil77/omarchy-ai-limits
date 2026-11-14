@@ -57,6 +57,7 @@ class Sandbox(unittest.TestCase):
     self.gemini.mkdir()
     patches = [
       mock.patch.object(limit, "CLAUDE_DIR", self.claude),
+      mock.patch.object(limit, "CLAUDE_PROFILE", root / "claude.json"),
       mock.patch.object(limit, "CODEX_DIR", self.codex),
       mock.patch.object(limit, "GEMINI_DIR", self.gemini),
       mock.patch.object(limit, "CACHE_DIR", self.cache),
@@ -67,6 +68,7 @@ class Sandbox(unittest.TestCase):
       p.start()
       self.addCleanup(p.stop)
     self.addCleanup(self.tmp.cleanup)
+    self.root = root
 
   def login(self, access="old-access", refresh="old-refresh", expires_in=3600, **extra):
     data = {"claudeAiOauth": {
@@ -377,13 +379,22 @@ class RpcLoop(unittest.TestCase):
 
 class Plan(Sandbox):
   def test_names(self):
+    # Since 2026-10-30: Max 5x is "Max", Max 20x is "Ultra".
     self.login()
-    self.assertEqual(limit.claude_plan(), "Max 5x")
+    self.assertEqual(limit.claude_plan(), "Max")
 
   def test_20x_and_plain(self):
     self.login(rateLimitTier="default_claude_max_20x")
-    self.assertEqual(limit.claude_plan(), "Max 20x")
-    self.login(rateLimitTier="")
+    self.assertEqual(limit.claude_plan(), "Ultra")
+    self.login(rateLimitTier="", subscriptionType="pro")
+    self.assertEqual(limit.claude_plan(), "Pro")
+
+  def test_the_profile_wins_over_the_login_kept_from_sign_in(self):
+    self.login(rateLimitTier="default_claude_max_5x")
+    (self.root / "claude.json").write_text(json.dumps({"oauthAccount": {
+      "organizationType": "claude_max", "organizationRateLimitTier": "default_claude_max_20x"}}))
+    self.assertEqual(limit.claude_plan(), "Ultra")
+    (self.root / "claude.json").write_text("not json")
     self.assertEqual(limit.claude_plan(), "Max")
 
   def test_no_file(self):
@@ -527,7 +538,9 @@ class Run(Sandbox):
 
   def run_with(self, now=NOW, fetch=None, force=False, renew=True):
     fetch = fetch or (lambda access: limit.windows(USAGE))
-    with mock.patch.object(limit.time, "time", return_value=now), mock.patch.object(limit, "claude_request", fetch):
+    # claude_request answers (windows, extra); fakes may give the windows alone.
+    request = lambda access: (lambda r: r if isinstance(r, tuple) else (r, None))(fetch(access))
+    with mock.patch.object(limit.time, "time", return_value=now), mock.patch.object(limit, "claude_request", request):
       return limit.run(force, renew, only=["claude"])["providers"][0]
 
   def windows_future(self):
@@ -543,7 +556,7 @@ class Run(Sandbox):
     self.assertTrue(out["ok"])
     self.assertEqual(out["error"], "")
     self.assertEqual((out["id"], out["name"], out["tool"], out["cmd"]), ("claude", "Claude", "Claude Code", "claude"))
-    self.assertEqual(out["plan"], "Max 5x")
+    self.assertEqual(out["plan"], "Max")
     self.assertEqual(out["windows"][0]["util"], 20.0)
     self.assertIsNone(out["windows"][0]["rate"])
     self.assertEqual(len(self.state()["samples"]["five_hour"]), 1)
@@ -620,7 +633,7 @@ class Run(Sandbox):
   def test_other_http_and_network_errors(self):
     self.login()
     self.assertEqual(self.run_with(fetch=lambda a: (_ for _ in ()).throw(http_error(500)))["error"], "http 500")
-    self.assertEqual(self.run_with(now=NOW + 100, fetch=lambda a: (_ for _ in ()).throw(OSError("x")))["error"], "network")
+    self.assertEqual(self.run_with(now=NOW + 200, fetch=lambda a: (_ for _ in ()).throw(OSError("x")))["error"], "network")
 
   def test_does_not_refetch_inside_the_minimum_interval(self):
     self.login()
@@ -954,8 +967,8 @@ class RunAll(Sandbox):
     (self.codex / "auth.json").write_text("{}")
     codex = {"windows": limit.codex_windows(RATE_LIMITS), "plan": "Plus"}
     gem = {"windows": limit.gemini_windows(BUCKETS), "plan": "Standard"}
-    for name, value in (("claude_request", lambda a: [{"key": "five_hour", "group": "session", "model": "", "util": 5.0,
-                                                       "resetsAt": NOW + 600, "window": 18000, "severity": ""}]),
+    for name, value in (("claude_request", lambda a: ([{"key": "five_hour", "group": "session", "model": "", "util": 5.0,
+                                                        "resetsAt": NOW + 600, "window": 18000, "severity": ""}], None)),
                         ("find_codex", lambda: "/bin/codex")):
       p = mock.patch.object(limit, name, value)
       p.start()
@@ -974,7 +987,7 @@ class RunAll(Sandbox):
     out = limit.run()
     self.assertEqual([p["id"] for p in out["providers"]], ["claude", "codex", "gemini"])
     self.assertEqual(out["selected"], "claude")
-    self.assertEqual([p["plan"] for p in out["providers"]], ["Max 5x", "Plus", "Standard"])
+    self.assertEqual([p["plan"] for p in out["providers"]], ["Max", "Plus", "Standard"])
     self.assertEqual(len(out["providers"][1]["windows"]), 2)
 
   def test_each_provider_has_its_own_state_file(self):
@@ -1016,15 +1029,24 @@ class RunAll(Sandbox):
     (self.codex / "auth.json").unlink()
     self.assertEqual(limit.run(), {"selected": "", "providers": []})
 
-  def test_codex_is_asked_less_often_than_claude(self):
+  def test_an_ai_not_on_the_bar_is_asked_five_times_less_often(self):
     calls = []
     with mock.patch.dict(limit.FETCHERS, {"codex": lambda s, n, r: calls.append(n) or {"windows": limit.codex_windows(RATE_LIMITS), "plan": ""}}):
-      limit.run()
-      with mock.patch.object(limit.time, "time", return_value=NOW + 60):
+      for at in (NOW, NOW + 400, NOW + 1200):
+        with mock.patch.object(limit.time, "time", return_value=at):
+          limit.run()
+      self.assertEqual(len(calls), 1, "Claude is on the bar: Codex waits 25 min")
+      with mock.patch.object(limit.time, "time", return_value=NOW + 1600):
         limit.run()
-      with mock.patch.object(limit.time, "time", return_value=NOW + 130):
+      self.assertEqual(len(calls), 2)
+      # On the bar, Codex is asked every 5 minutes; a click asks every AI.
+      limit.write_selected("codex")
+      with mock.patch.object(limit.time, "time", return_value=NOW + 1950):
         limit.run()
-    self.assertEqual(len(calls), 2)
+      self.assertEqual(len(calls), 3)
+      with mock.patch.object(limit.time, "time", return_value=NOW + 1965):
+        limit.run(force=True)
+      self.assertEqual(len(calls), 4)
 
 
 class Cli(Sandbox):
@@ -1054,6 +1076,22 @@ class Cli(Sandbox):
     data = json.loads(out.getvalue())
     self.assertEqual([p["id"] for p in data["providers"]], ["claude"])
     self.assertEqual(data["providers"][0]["windows"], [])
+
+
+
+class Extra(unittest.TestCase):
+  def test_minor_units_and_cap(self):
+    e = limit.extra_usage({"extra_usage": {"is_enabled": True, "monthly_limit": 5000, "used_credits": 1240,
+                                           "currency": "USD", "decimal_places": 2, "spend_limit_reached": False}})
+    self.assertEqual(e, {"used": 12.4, "limit": 50.0, "currency": "USD", "reached": False})
+
+  def test_no_cap_missing_scale_and_off(self):
+    e = limit.extra_usage({"extra_usage": {"is_enabled": True, "monthly_limit": None, "used_credits": 300}})
+    self.assertEqual((e["used"], e["limit"], e["currency"]), (3.0, None, "USD"))
+    self.assertIsNone(limit.extra_usage({"extra_usage": {"is_enabled": False, "used_credits": 0.0, "monthly_limit": 500}}))
+    self.assertIsNone(limit.extra_usage({"extra_usage": {"is_enabled": True, "used_credits": "x"}}))
+    self.assertIsNone(limit.extra_usage({}))
+    self.assertIsNone(limit.extra_usage(None))
 
 
 if __name__ == "__main__":

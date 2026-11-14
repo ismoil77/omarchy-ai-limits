@@ -4,6 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
+import "kit" as Kit
 import "kit/Contrast.js" as Contrast
 import "Strings.js" as Strings
 
@@ -36,9 +37,8 @@ Panel {
   ipcTarget: "ismoil.ai-limits"
   manageIpc: false
 
-  readonly property int pollSeconds: Math.max(45, Number(setting("interval", 60)) || 60)
+  readonly property int pollSeconds: Math.max(60, Number(setting("interval", 90)) || 90)
   readonly property string script: decodeURIComponent(String(Qt.resolvedUrl("limit.py")).replace(/^file:\/\//, ""))
-  readonly property string colorsPath: Quickshell.env("HOME") + "/.local/state/omarchy/current/theme/colors.toml"
 
   readonly property bool vertical: bar ? bar.vertical : false
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
@@ -96,7 +96,14 @@ Panel {
   readonly property string marks: markOf(info.id)
   property bool loaded: false
   property real now: Date.now() / 1000
-  property var themePalette: ({})
+  Kit.ThemePalette { id: themePalette }
+  Kit.Look {
+    id: skin
+    textSize: String(root.setting("textSize", "Normal"))
+    animations: root.motion
+    fontFamily: root.fontFamily
+    themeColors: themePalette.colors
+  }
 
   // The window the bar shows: the 5-hour one where there is one, else the first.
   readonly property var session: Model.mainWindow(info) || { key: "", group: "session", model: "", util: 0, resetsAt: null, window: 18000, rate: null }
@@ -140,9 +147,7 @@ Panel {
   function levelText(level) { return level === "idle" ? popupDim : onPopup(levelColor(level), 4.5) }
   function levelFill(level) { return level === "idle" ? popupLine : onPopup(levelColor(level), 3) }
 
-  function themeColor(name, fallback) {
-    return themePalette[name] ? themePalette[name] : fallback
-  }
+  function themeColor(name, fallback) { return skin.themed(name, fallback) }
 
   readonly property string tooltip: Model.tooltip(providers, loaded, now, cfg)
 
@@ -163,7 +168,6 @@ Panel {
     if (setting("renewLogin", false) === true) args.push("--renew")
     proc.command = args
     proc.running = true
-    colorsFile.reload()
   }
 
   function apply(text) {
@@ -201,14 +205,6 @@ Panel {
     select(providers[(at + direction + providers.length) % providers.length].id)
   }
 
-  function parseColors(text) {
-    var next = {}
-    var re = /^\s*(red|yellow|green)\s*=\s*"(#[0-9A-Fa-f]{6})"/gm
-    var m
-    while ((m = re.exec(text)) !== null) next[m[1]] = m[2]
-    themePalette = next
-  }
-
   onOpenedChanged: if (opened) { now = Date.now() / 1000; refresh(false) }
 
   IpcHandler {
@@ -233,12 +229,6 @@ Panel {
       root.pendingSelect = ""
       root.refresh(force, select)
     }
-  }
-
-  FileView {
-    id: colorsFile
-    path: root.colorsPath
-    onLoaded: root.parseColors(text())
   }
 
   Timer {
@@ -483,14 +473,23 @@ Panel {
             width: parent.width
             implicitHeight: Math.max(heroIcon.implicitHeight, heroLabels.implicitHeight, refreshButton.implicitHeight)
 
-            Text {
+            Rectangle {
               id: heroIcon
-              text: root.marks
-              color: root.levelFill(root.sessionPace.level)
-              font.family: root.fontFamily
-              font.pixelSize: root.fsHero
+              width: Math.round(root.fsHero * 1.7)
+              height: width
+              radius: skin.radius
+              color: Util.alpha(root.levelFill(root.sessionPace.level), 0.16)
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
+              Behavior on color { ColorAnimation { duration: root.fade } }
+
+              Text {
+                anchors.centerIn: parent
+                text: root.marks
+                color: root.levelText(root.sessionPace.level)
+                font.family: root.fontFamily
+                font.pixelSize: root.fsHero
+              }
             }
 
             Column {
@@ -601,8 +600,9 @@ Panel {
           Repeater {
             model: root.info.windows
 
-            delegate: Column {
+            delegate: Kit.Card {
               id: card
+              look: skin
               required property var modelData
               required property int index
               readonly property var p: Model.pace(modelData, root.now, root.info, root.cfg)
@@ -613,8 +613,6 @@ Panel {
 
               width: column.width
               spacing: Style.space(8)
-
-              PanelSeparator { width: parent.width; visible: card.index > 0 }
 
               Item {
                 width: parent.width
@@ -710,7 +708,7 @@ Panel {
                 delegate: Item {
                   id: row
                   required property var modelData
-                  width: card.width
+                  width: card.width - card.padding * 2
                   readonly property real gap: Style.space(12)
                   // 10% slack: TextMetrics measures without tabular figures.
                   readonly property bool side: labelWidth.width + valueWidth.width * 1.1 + gap <= width
@@ -762,6 +760,20 @@ Panel {
             }
           }
 
+          // ---------- Pay-as-you-go past the plan (Claude) ----------
+          Kit.Tile {
+            readonly property var line: Model.extraLine(root.info, root.cfg)
+            visible: line !== null
+            width: parent.width
+            look: skin
+            caption: line ? line.title : ""
+            value: line ? line.value : ""
+            valueColor: line && line.reached ? root.levelText("red") : skin.ink
+            fraction: line ? line.fraction : -1
+            fill: line && line.reached ? root.levelFill("red") : skin.accentFill
+            detail: line ? line.note : ""
+          }
+
           // ---------- Legend: how to read the meter ----------
           Column {
             visible: root.info.windows.length > 0
@@ -807,6 +819,8 @@ Panel {
               }
 
               Row {
+                // The shade is the 5-hour window's ceiling: no such window, no legend for it.
+                visible: Model.mainWindow(root.info) !== null && Model.mainWindow(root.info).group === "session"
                 spacing: Style.space(6)
                 Rectangle {
                   anchors.verticalCenter: parent.verticalCenter

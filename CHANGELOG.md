@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.0.0 — Ultra, extra usage, lighter
+
+- Claude's new plan names: Max 20x is **Ultra**, Max 5x is **Max**. The plan is read from the profile
+  Claude Code refreshes (`~/.claude.json`), not the login file that keeps the plan from sign-in, so an
+  upgrade shows at once.
+- Ultra without a 5-hour window says "no 5-hour limit"; the weekly window (and Fable's) lead.
+- **Extra usage**: what was spent past the plan this month, against the monthly cap.
+- New look from kit 1.2: windows in cards, the AI's mark in a tinted square, theme colours followed live.
+- Lighter: Claude is asked at most every 2 minutes (was 45 s), an AI that is not on the bar 5 times less
+  often — Codex no longer starts its app-server every 2 minutes in the background; the widget reads
+  the shared cache every 90 s (was 60); colours are no longer re-read on every poll.
+- Requests say who they are (`User-Agent: ismoil-ai-limits/3.0`) instead of urllib's default.
+
 ## 2.2.1 — private cache, sturdier reads
 
 - **The cache is owner-only.** `~/.cache/ismoil-ai-limits/` is 0700 and every file in it 0600,

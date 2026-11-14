@@ -30,13 +30,18 @@ Only tools that are signed in on this machine appear.
   - status is a word *and* a shape (✓ ▲ ✕), never colour alone;
   - the popup scrolls instead of clipping when the text is large;
   - `animations: false` stops the meters from sliding.
+- **Current plans.** Ultra (formerly Max 20x) and Max (formerly Max 5x), read from the profile
+  Claude Code keeps fresh, so an upgrade shows at once; an Ultra account without a 5-hour window
+  says so, and the week leads.
+- **Light.** Claude is asked at most every 2 minutes, an AI that is not on the bar 5 times less
+  often, and all bar instances share one cache.
 - **English and Russian** (`language`: `auto` follows your locale).
 
 ## Supported AIs
 
 | AI | Where the numbers come from | What you see | Login |
 |---|---|---|---|
-| **Claude** | Anthropic's OAuth usage endpoint (what `/usage` shows) | 5-hour window, week, model weeks (e.g. Fable) | Claude Code |
+| **Claude** | Anthropic's OAuth usage endpoint (what `/usage` shows) | 5-hour window (none on a verified Ultra plan), week, model weeks (e.g. Fable), extra usage past the plan | Claude Code |
 | **Codex** | the `codex app-server` RPC `account/rateLimits/read`, run read-only | its 5-hour / weekly windows, or the single long window of free and Go plans | Codex CLI |
 | **Gemini** | Google Code Assist `retrieveUserQuota` | daily quota per model family: Pro, Flash, Flash Lite | Gemini CLI (Google login) |
 
@@ -99,7 +104,7 @@ Set in the widget's entry in `~/.config/omarchy/shell.json`, or in the shell's b
 | `clock` | `24-hour` | or `12-hour` |
 | `animations` | `true` | `false` stops the meters from sliding |
 | `renewLogin` | `false` | `true`: renew an expired **Claude** login by itself (see Privacy) |
-| `interval` | `60` | refresh seconds (at least 45); Codex and Gemini are asked at most every 2 minutes (a manual refresh may ask every 10 seconds) |
+| `interval` | `90` | seconds between reads of the shared cache (at least 60). Claude is asked at most every 2 minutes, Codex and Gemini every 5; an AI that is not on the bar 5 times less often. A click (or `r`) asks all of them, at most every 10 seconds. |
 
 ## Privacy and what it touches
 

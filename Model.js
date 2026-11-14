@@ -357,7 +357,7 @@ function headerText(info, loaded, stale, now, cfg) {
   cfg = cfgOf(cfg)
   if (!loaded) return S.t(cfg.lang, "loading")
   var parts = []
-  if (info.plan) parts.push(info.plan)
+  if (info.plan) parts.push(planText(info, cfg))
   parts.push(info.fetchedAt > 0 ? S.t(cfg.lang, "updated", { time: when(info.fetchedAt, now, cfg) }) : S.t(cfg.lang, "noData"))
   if (stale) parts.push(staleText(info, cfg) || S.t(cfg.lang, "staleStopped"))
   return parts.join(" · ")
@@ -412,4 +412,39 @@ function barTime(p, w, cfg) {
   cfg = cfgOf(cfg)
   if (p.open) return duration(p.leftHours, cfg, true)
   return duration((w ? w.window : 18000) / 3600, cfg, true)
+}
+
+// "$12.40", "R$ 3,00": the symbol for common currencies, else the ISO code.
+var CURRENCY = { USD: "$", EUR: "€", GBP: "£", BRL: "R$ ", JPY: "¥", INR: "₹" }
+function money(n, currency, cfg) {
+  var lang = cfgOf(cfg).lang
+  var code = String(currency || "USD").toUpperCase()
+  var text = S.num(lang, Number(n) || 0, 2)
+  return CURRENCY[code] ? CURRENCY[code] + text : text + " " + code
+}
+
+// Extra usage: { title, value, fraction (-1 = no cap), reached } or null.
+function extraLine(info, cfg) {
+  var e = info && info.extra
+  if (!e) return null
+  var lang = cfgOf(cfg).lang
+  var used = money(e.used, e.currency, cfg)
+  var capped = e.limit !== null && e.limit !== undefined && e.limit > 0
+  return {
+    title: S.t(lang, "extraTitle"),
+    value: capped ? S.t(lang, "extraSpentOf", { used: used, limit: money(e.limit, e.currency, cfg) }) : S.t(lang, "extraSpent", { used: used }),
+    note: S.t(lang, e.reached ? "extraReached" : "extraOk"),
+    fraction: capped ? Math.min(1, e.used / e.limit) : -1,
+    reached: !!e.reached
+  }
+}
+
+// Ultra without a 5-hour window says so, so the missing window is not a bug.
+function planText(info, cfg) {
+  if (!info || !info.plan) return ""
+  var hasSession = false
+  var ws = info.windows || []
+  for (var i = 0; i < ws.length; i++) if (ws[i].group === "session") hasSession = true
+  return info.id === "claude" && !hasSession && ws.length > 0
+    ? info.plan + " · " + S.t(cfgOf(cfg).lang, "planNoSession") : info.plan
 }

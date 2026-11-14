@@ -461,3 +461,27 @@ test("a daily Gemini quota runs out at a clock time inside active hours", () => 
 test("the empty state has words in both languages", () => {
   assert.match(M.noLimitsText({ error: "auth", tool: "Codex", cmd: "codex" }, EN), /not signed in to Codex/)
 })
+
+test("Ultra without a 5-hour window says so; other plans do not", () => {
+  const weekly = { key: "weekly_all", group: "weekly", model: "", util: 16, resetsAt: 2e9, window: 604800 }
+  const session = { ...weekly, key: "five_hour", group: "session", window: 18000 }
+  const ru = M.config({ language: "ru" })
+  assert.equal(M.planText({ id: "claude", plan: "Ultra", windows: [weekly] }, ru), "Ultra · без 5-часового лимита")
+  assert.equal(M.planText({ id: "claude", plan: "Max", windows: [session, weekly] }, ru), "Max")
+  assert.equal(M.planText({ id: "codex", plan: "Go", windows: [weekly] }, ru), "Go")
+  assert.equal(M.planText({ id: "claude", plan: "", windows: [] }, ru), "")
+})
+
+test("extra usage: money in the user's language, with and without a cap", () => {
+  const en = M.config({ language: "en" })
+  const ru = M.config({ language: "ru" })
+  const capped = M.extraLine({ extra: { used: 12.4, limit: 50, currency: "USD", reached: false } }, en)
+  assert.equal(capped.value, "$12.40 of $50.00 this month")
+  assert.equal(capped.fraction, 12.4 / 50)
+  const open = M.extraLine({ extra: { used: 3, limit: null, currency: "BRL", reached: false } }, ru)
+  assert.equal(open.value, "потрачено R$ 3,00 в этом месяце")
+  assert.equal(open.fraction, -1)
+  assert.equal(M.extraLine({ extra: { used: 50, limit: 50, currency: "XYZ", reached: true } }, en).reached, true)
+  assert.equal(M.money(5, "XYZ", en), "5.00 XYZ")
+  assert.equal(M.extraLine({ extra: null }, en), null)
+})
