@@ -21,7 +21,8 @@ Item {
 
   Rectangle {
     id: mark
-    width: Math.round(header.look.hero * 1.75)
+    // Even, so the glyph's centre falls on a whole pixel.
+    width: 2 * Math.round(header.look.hero * 1.75 / 2)
     height: width
     radius: Math.round(width * 0.27)
     color: Util.alpha(header.tone, 0.15)
@@ -32,13 +33,12 @@ Item {
 
     Behavior on color { ColorAnimation { duration: header.look.fade } }
 
-    Text {
-      anchors.centerIn: parent
-      textFormat: Text.PlainText
+    Glyph {
+      anchors.fill: parent
       text: header.glyph
       color: header.toneText
-      font.family: header.look.fontFamily
-      font.pixelSize: header.look.hero
+      fontFamily: header.look.fontFamily
+      pixelSize: 2 * Math.round(header.look.hero / 2)
     }
   }
 
