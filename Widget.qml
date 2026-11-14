@@ -39,6 +39,9 @@ Panel {
 
   readonly property int pollSeconds: Math.max(60, Number(setting("interval", 90)) || 90)
   readonly property string script: decodeURIComponent(String(Qt.resolvedUrl("limit.py")).replace(/^file:\/\//, ""))
+  // The version for the signature, from the manifest so it never drifts.
+  FileView { id: manifestFile; path: decodeURIComponent(String(Qt.resolvedUrl("manifest.json")).replace(/^file:\/\//, "")); blockLoading: true }
+  readonly property string version: { try { return JSON.parse(manifestFile.text()).version || "" } catch (e) { return "" } }
 
   readonly property bool vertical: bar ? bar.vertical : false
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
@@ -468,71 +471,17 @@ Panel {
           width: parent.width
           spacing: Style.space(12)
 
-          // ---------- Header: the chosen AI's mark, name / plan, updated · refresh ----------
-          Item {
+          Kit.Header {
             width: parent.width
-            implicitHeight: Math.max(heroIcon.implicitHeight, heroLabels.implicitHeight, refreshButton.implicitHeight)
-
-            Rectangle {
-              id: heroIcon
-              width: Math.round(root.fsHero * 1.7)
-              height: width
-              radius: skin.radius
-              color: Util.alpha(root.levelFill(root.sessionPace.level), 0.16)
-              anchors.left: parent.left
-              anchors.verticalCenter: parent.verticalCenter
-              Behavior on color { ColorAnimation { duration: root.fade } }
-
-              Text {
-                anchors.centerIn: parent
-                text: root.marks
-                color: root.levelText(root.sessionPace.level)
-                font.family: root.fontFamily
-                font.pixelSize: root.fsHero
-              }
-            }
-
-            Column {
-              id: heroLabels
-              anchors.left: heroIcon.right
-              anchors.leftMargin: Style.space(12)
-              anchors.right: refreshButton.left
-              anchors.rightMargin: Style.space(8)
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(2)
-
-              Text {
-                text: root.info.name
-                color: root.popupText
-                font.family: root.fontFamily
-                font.pixelSize: root.fsBig
-                font.bold: true
-              }
-
-              Text {
-                width: parent.width
-                wrapMode: Text.WordWrap
-                text: Model.headerText(root.info, root.loaded, root.stale, root.now, root.cfg)
-                color: root.stale ? root.onPopup(root.themeColor("red", Color.urgent)) : root.popupDim
-                font.family: root.fontFamily
-                font.pixelSize: root.fsSmall
-              }
-            }
-
-            Button {
-              id: refreshButton
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              iconText: "󰑐"
-              iconSpinning: proc.running
-              tooltipText: Strings.t(root.cfg.lang, "refreshTip")
-              bordered: true
-              foreground: root.popupText
-              fontFamily: root.fontFamily
-              fontSize: root.fsText
-              verticalPadding: Style.space(4)
-              onClicked: root.refresh(true)
-            }
+            look: skin
+            glyph: root.marks
+            name: root.info.name
+            value: root.hasWindow ? Math.round(root.sessionPace.util) + "%" : "—"
+            say: Model.headerText(root.info, root.loaded, root.stale, root.now, root.cfg)
+            sayColor: root.stale ? root.onPopup(root.themeColor("red", Color.urgent)) : skin.dim
+            chip: root.hasWindow ? Model.statusText(root.sessionPace, root.cfg) : ""
+            tone: root.levelFill(root.sessionPace.level)
+            toneText: root.levelText(root.sessionPace.level)
           }
 
           // ---------- Which AI: a chip each, only when there is a choice ----------
@@ -544,54 +493,16 @@ Panel {
             Repeater {
               model: root.providers
 
-              delegate: Rectangle {
+              delegate: Kit.ActionButton {
                 id: chip
                 required property var modelData
-                readonly property bool current: modelData.id === root.selectedId
                 readonly property var mainWindow: Model.mainWindow(modelData)
                 readonly property var mainPace: Model.pace(mainWindow || { group: "session", model: "", util: 0, resetsAt: null, window: 18000, rate: null }, root.now, modelData, root.cfg)
-
-                width: chipRow.implicitWidth + Style.space(18)
-                height: chipRow.implicitHeight + Style.space(10)
-                radius: height / 2
-                color: current ? Util.alpha(root.popupText, 0.14) : "transparent"
-                border.width: current ? 2 : 1
-                border.color: current ? root.popupText : root.popupLine
-
-                Row {
-                  id: chipRow
-                  anchors.centerIn: parent
-                  spacing: Style.space(6)
-
-                  Text {
-                    text: root.markOf(chip.modelData.id)
-                    color: root.levelText(chip.mainPace.level)
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fsText
-                  }
-
-                  Text {
-                    text: chip.modelData.name
-                    color: root.popupText
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fsText
-                    font.bold: chip.current
-                  }
-
-                  Text {
-                    text: chip.mainWindow ? Math.round(chip.mainPace.util) + "%" : "–"
-                    color: root.popupDim
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fsSmall
-                    font.features: { "tnum": 1 }
-                  }
-                }
-
-                MouseArea {
-                  anchors.fill: parent
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: root.select(chip.modelData.id)
-                }
+                look: skin
+                compact: true
+                selected: modelData.id === root.selectedId
+                text: root.markOf(modelData.id) + " " + modelData.name + "  " + (mainWindow ? Math.round(mainPace.util) + "%" : "–")
+                onClicked: root.select(modelData.id)
               }
             }
           }
@@ -600,9 +511,13 @@ Panel {
           Repeater {
             model: root.info.windows
 
-            delegate: Kit.Card {
+            delegate: Kit.Section {
               id: card
               look: skin
+              caption: Model.title(card.modelData, root.cfg)
+              hint: Math.round(card.p.util) + "%"
+              hintColor: card.tone
+              hintStrong: true
               required property var modelData
               required property int index
               readonly property var p: Model.pace(modelData, root.now, root.info, root.cfg)
@@ -614,36 +529,6 @@ Panel {
               width: column.width
               spacing: Style.space(8)
 
-              Item {
-                width: parent.width
-                implicitHeight: Math.max(cardTitle.implicitHeight, cardPercent.implicitHeight)
-
-                Text {
-                  id: cardTitle
-                  anchors.left: parent.left
-                  anchors.right: cardPercent.left
-                  anchors.rightMargin: Style.space(8)
-                  anchors.verticalCenter: parent.verticalCenter
-                  wrapMode: Text.WordWrap
-                  text: Model.title(card.modelData, root.cfg)
-                  color: root.popupText
-                  font.family: root.fontFamily
-                  font.pixelSize: root.fsStrong
-                  font.bold: true
-                }
-
-                Text {
-                  id: cardPercent
-                  anchors.right: parent.right
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: Math.round(card.p.util) + "%"
-                  color: card.tone
-                  font.family: root.fontFamily
-                  font.pixelSize: root.fsBig
-                  font.bold: true
-                  font.features: { "tnum": 1 }
-                }
-              }
 
               // Status: a word and a shape as well as the colour.
               Rectangle {
@@ -850,15 +735,30 @@ Panel {
             }
           }
 
-          Button {
-            visible: root.info.windows.length > 0
-            text: Strings.t(root.cfg.lang, root.details ? "hideDetails" : "showDetails")
-            bordered: true
-            foreground: root.popupText
-            fontFamily: root.fontFamily
-            fontSize: root.fsText
-            verticalPadding: Style.space(4)
-            onClicked: root.details = !root.details
+          Kit.ActionRow {
+            width: parent.width
+
+            Kit.ActionButton {
+              look: skin
+              iconText: "󰑐"
+              text: Strings.t(root.cfg.lang, "refresh")
+              primary: true
+              onClicked: root.refresh(true)
+            }
+            Kit.ActionButton {
+              visible: root.info.windows.length > 0
+              look: skin
+              text: Strings.t(root.cfg.lang, root.details ? "hideDetails" : "showDetails")
+              onClicked: root.details = !root.details
+            }
+          }
+
+          Kit.Signature {
+            width: parent.width
+            look: skin
+            widget: "ai limits"
+            extra: root.info.fetchedAt > 0 ? Strings.t(root.cfg.lang, "updated", { time: Model.when(root.info.fetchedAt, root.now, root.cfg) }) : ""
+            version: root.version
           }
 
           Text {
