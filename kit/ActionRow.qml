@@ -8,7 +8,8 @@ Row {
 
   readonly property var shown: {
     var out = []
-    for (var i = 0; i < children.length; i++) if (children[i].visible) out.push(children[i])
+    // A Repeater is a child too but no cell: only what it makes counts.
+    for (var i = 0; i < children.length; i++) if (children[i].visible && children[i].delegate === undefined) out.push(children[i])
     return out
   }
   readonly property real cell: shown.length > 0 ? (width - spacing * (shown.length - 1)) / shown.length : 0
