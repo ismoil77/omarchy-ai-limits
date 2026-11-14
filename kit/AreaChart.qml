@@ -17,8 +17,13 @@ Column {
 
   spacing: Style.space(4)
 
-  onSeriesChanged: canvas.requestPaint()
-  onCapacityChanged: canvas.requestPaint()
+  // false while nobody can see the chart (a closed popup): new values are
+  // kept, the painting waits until it is live again.
+  property bool live: true
+
+  onSeriesChanged: if (live) canvas.requestPaint()
+  onCapacityChanged: if (live) canvas.requestPaint()
+  onLiveChanged: if (live) canvas.requestPaint()
 
   Canvas {
     id: canvas

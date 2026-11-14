@@ -22,8 +22,15 @@ Rectangle {
     ? Qt.color(Contrast.ensure("#ffffff", String(fillColor), 4.5) === "#ffffff" ? "#ffffff" : "#000000")
     : danger ? look.badText : look.ink
 
-  implicitWidth: row.implicitWidth + Style.space(compact ? 14 : 20)
-  implicitHeight: row.implicitHeight + Style.space(compact ? 4 : 12)
+  // Sizes come from measured text, never from the laid-out row: the label
+  // elides to the button's width, so the width must not depend on the label.
+  readonly property real iconWidth: iconText !== "" ? iconMetrics.width + Style.space(6) : 0
+  readonly property real pad: Style.space(compact ? 14 : 20)
+  implicitWidth: iconWidth + labelMetrics.width + pad
+  implicitHeight: Math.max(labelMetrics.height, iconMetrics.height) + Style.space(compact ? 4 : 12)
+
+  TextMetrics { id: labelMetrics; text: action.text; font.family: action.look.fontFamily; font.pixelSize: action.look.small; font.bold: true }
+  TextMetrics { id: iconMetrics; text: action.iconText || " "; font.family: action.look.fontFamily; font.pixelSize: action.look.body }
   radius: Math.round(Style.space(compact ? 6 : 8))
   color: area.containsMouse && !primary && !selected ? look.surfaceHover : fillColor
   border.width: primary ? 0 : 1.5
@@ -56,7 +63,7 @@ Rectangle {
       font.pixelSize: action.look.small
       font.bold: true
       elide: Text.ElideRight
-      width: Math.min(implicitWidth, action.width - (action.iconText !== "" ? action.look.body + Style.space(26) : Style.space(16)))
+      width: Math.max(0, Math.min(labelMetrics.width + 1, action.width - action.pad - action.iconWidth))
     }
   }
 
