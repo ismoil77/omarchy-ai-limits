@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "ismoil.ai-limits",
   "name": "AI limits",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "author": "ismoil",
   "license": "MIT",
-  "description": "Usage limits of the AI tools on this machine — Claude, Codex, Gemini — in the bar, with a switch between them, plain-language verdicts, pace meters and forecasts. Readable for low vision (text scaling, WCAG AA contrast), English and Russian.",
+  "description": "Claude, Codex and Gemini limits in the bar, with a plain verdict, pace and forecast for every limit window. Knows Ultra, Max and Pro, counts usage from all your devices, and warns before a window runs out. English and Russian, readable for low vision.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "AI limits",
-    "description": "Claude, Codex and Gemini limits in the bar; popup with every window, pace and forecast",
+    "description": "Claude, Codex and Gemini limits with a verdict and forecast",
     "category": "AI",
     "allowMultiple": false,
     "defaultSection": "right",

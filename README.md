@@ -7,7 +7,11 @@ Built to be read by people with low vision.
 
 [Русская версия](README.ru.md)
 
-![The popup, English](docs/preview-en.png)
+![AI limits](preview.png)
+
+| English | Русский |
+|---|---|
+| ![the popup](docs/preview-en.png) | ![окно](docs/preview-ru.png) |
 
 In the bar: `✻ [meter] 9% 4h22m W9%` — the selected AI's mark and meter in a pace colour,
 the percent used, the time to reset, and a chip when a longer window needs attention.

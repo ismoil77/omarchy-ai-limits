@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.1
+
+- A landscape banner as the marketplace preview (the card crops a strip from the centre, a tall popup
+  screenshot showed only its blurred top); a shorter description that says what the widget is first;
+  the README shows the popup in both languages.
+
 ## 3.1.0 — family look and audit
 
 - The family look (kit 2). The popup is built the first time it opens; closed, the clock ticks once a
