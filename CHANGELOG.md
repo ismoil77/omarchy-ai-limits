@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.1.0 — family look and audit
+
+- The family look (kit 2). The popup is built the first time it opens; closed, the clock ticks once a
+  minute instead of every 15 s.
+- **A week on an even pace is no longer red or yellow.** On Ultra the week is the main window, and 1%
+  on Monday morning read as "runs out on Wednesday". A long window is now judged after 15% of its
+  working hours (at most one working day) and only when clearly ahead of the even pace.
+- Redirects are refused: urllib would resend the Authorization header to wherever a 30x points.
+- The 30-day history works again on accounts whose newer samples carry no 5-hour figure.
+- `--select` is written under the lock; `providers` matches any case and an unknown name shows nothing
+  instead of everything; a Gemini project refused by the server is forgotten.
+- One failed fetch of Codex or Gemini no longer dims the numbers (they count as current for 10 minutes).
+- With no window the bar no longer shows "5h". Manifest default of `interval` is 90 like the code.
+- README: `~/.claude.json` is read for the plan; what the cache holds.
+
 ## 3.0.0 — Ultra, extra usage, lighter
 
 - Claude's new plan names: Max 20x is **Ultra**, Max 5x is **Max**. The plan is read from the profile

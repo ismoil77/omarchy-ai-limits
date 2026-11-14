@@ -62,7 +62,7 @@ been confirmed against a live account — please open an issue if its numbers lo
 
 - Omarchy with the shell plugin system (`omarchy plugin` exists).
 - `python3` 3.8+ (standard library only).
-- At least one of: Claude Code (Pro/Max login), Codex CLI, Gemini CLI (Google login).
+- At least one of: Claude Code (Pro/Max/Ultra login), Codex CLI, Gemini CLI (Google login).
   API-key logins have no subscription limits to show.
 
 ## Install
@@ -111,7 +111,10 @@ Set in the widget's entry in `~/.config/omarchy/shell.json`, or in the shell's b
 Read this: the widget handles your AI logins.
 
 - **Claude:** reads `~/.claude/.credentials.json` (or `$CLAUDE_CONFIG_DIR`) and sends the
-  access token **only** to `https://api.anthropic.com/api/oauth/usage`.
+  access token **only** to `https://api.anthropic.com/api/oauth/usage`. Redirects are refused, so
+  a token cannot follow one to another host (the same for Gemini and the renewal below).
+- **Claude Code's profile:** `~/.claude.json` is read, never written, for one thing: the plan
+  the account has now (`oauthAccount.organizationRateLimitTier`). Nothing else in it is used or sent.
 - **Claude desktop app's usage log:** when `~/.config/Claude/plan-usage-history.json`
   (`$XDG_CONFIG_HOME/Claude/`) exists, it is read, never written, only for the account's recorded
   5-hour and 7-day percents. Nothing from it is sent anywhere.
@@ -127,8 +130,9 @@ Read this: the widget handles your AI logins.
   `https://platform.claude.com/v1/oauth/token`, and the new pair is written back to
   `.credentials.json` (atomically, same permissions, other keys kept). A failed renewal is not
   retried for 10 minutes. Because the refresh token rotates, a Claude Code session that was already
-  running may need `claude` restarted once if it had cached the old pair.
-- Nothing else leaves your machine. Cached numbers (usage percents, plan name, the AI you picked) live in `~/.cache/ismoil-ai-limits/`; the folder is owner-only (0700) and its files 0600.
+  running may need `claude` restarted once if it had cached the old pair. If the new pair cannot be
+  written back (a read-only file), the old refresh token is already spent: run `claude` to sign in again.
+- Nothing else leaves your machine. Cached numbers (usage percents, plan name, extra-usage money, Gemini's project id, the AI you picked) live in `~/.cache/ismoil-ai-limits/`; the folder is owner-only (0700) and its files 0600.
 
 ## How the colours are decided
 

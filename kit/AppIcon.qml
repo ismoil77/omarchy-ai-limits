@@ -14,6 +14,16 @@ Item {
   property string name: ""
   property real size: Style.space(22)
 
+  // The first letter or digit in any script: a letter has two cases, or is
+  // above ASCII (CJK has no case); punctuation and spaces are skipped.
+  readonly property string initial: {
+    var chars = Array.from(String(name))
+    for (var i = 0; i < chars.length; i++) {
+      var c = chars[i]
+      if (/[0-9]/.test(c) || c.toLowerCase() !== c.toUpperCase() || c.codePointAt(0) > 0x2FFF) return c.toUpperCase()
+    }
+    return ""
+  }
   readonly property color tint: appIcon.look.onPopup(Theme.tintFor(name, look.themeColors, String(look.accent)), 3)
 
   implicitWidth: size
@@ -38,7 +48,7 @@ Item {
     Text {
       anchors.centerIn: parent
       textFormat: Text.PlainText
-      text: appIcon.name.replace(/^[^A-Za-zА-Яа-я0-9]+/, "").charAt(0).toUpperCase()
+      text: appIcon.initial
       color: Contrast.ensure("#ffffff", String(appIcon.tint), 3) === "#ffffff" ? "#ffffff" : "#000000"
       font.family: appIcon.look.fontFamily
       font.pixelSize: Math.round(appIcon.size * 0.55)

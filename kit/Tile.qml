@@ -15,7 +15,6 @@ Card {
   property real mark: -1
   property color fill: look.accentFill
   property string action: ""
-  property string actionTip: ""
 
   signal activated()
 

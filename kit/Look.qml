@@ -1,7 +1,10 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import "Contrast.js" as Contrast
 
+// (`Commons.Color`, qualified: QtQuick has a `Color` type of its own that an
+// unqualified name can resolve to.)
 // How a widget's popup looks, in one place: colours held to WCAG contrast on
 // the popup background, a type scale with a legibility floor that follows the
 // user's `textSize`, and the animation switch. Components in this folder take
@@ -22,8 +25,8 @@ Item {
   property string fontFamily: Style.font.family
   // The theme's accent as it arrives; `accentText`, `accentFill`, `accentSoft`,
   // `urgentText`, `ink` and `dim` are held to contrast.
-  property color accent: Color.accent
-  property color urgent: Color.urgent
+  property color accent: Commons.Color.accent
+  property color urgent: Commons.Color.urgent
 
   readonly property real textScale: {
     var v = String(textSize).toLowerCase()
@@ -43,10 +46,9 @@ Item {
   readonly property int bottomPad: Style.space(10)
 
   // The popup's background as seen: a translucent one is judged over the theme's own background.
-  readonly property string background: Contrast.flatten(String(Color.popups.background), String(Color.background))
-  readonly property color ink: Qt.color(Contrast.ensure(String(Color.popups.text), background, 7))
-  readonly property color dim: Qt.color(Contrast.ensure(Contrast.mix(String(Color.popups.text), background, 0.22), background, 4.5))
-  readonly property color line: Qt.color(Contrast.mix(String(Color.popups.text), background, 0.45))
+  readonly property string background: Contrast.flatten(String(Commons.Color.popups.background), String(Commons.Color.background))
+  readonly property color ink: Qt.color(Contrast.ensure(String(Commons.Color.popups.text), background, 7))
+  readonly property color dim: Qt.color(Contrast.ensure(Contrast.mix(String(Commons.Color.popups.text), background, 0.22), background, 4.5))
   readonly property color track: Util.alpha(ink, 0.10)
   readonly property color accentText: onPopup(accent, 4.5)
   readonly property color accentFill: onPopup(accent, 3)
@@ -61,8 +63,8 @@ Item {
 
   // Cards: the popup's text faded nearly into its background, a raised
   // surface on light and dark themes alike.
-  readonly property color surface: Qt.color(Contrast.mix(background, String(Color.popups.text), 0.05))
-  readonly property color surfaceHover: Qt.color(Contrast.mix(background, String(Color.popups.text), 0.10))
+  readonly property color surface: Qt.color(Contrast.mix(background, String(Commons.Color.popups.text), 0.05))
+  readonly property color surfaceHover: Qt.color(Contrast.mix(background, String(Commons.Color.popups.text), 0.10))
   readonly property real radius: Math.max(6, Style.cornerRadius + 2)
 
   // Levels: calm / tight / danger, as graphics (3:1) and as text (4.5:1).

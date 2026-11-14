@@ -485,3 +485,19 @@ test("extra usage: money in the user's language, with and without a cap", () => 
   assert.equal(M.money(5, "XYZ", en), "5.00 XYZ")
   assert.equal(M.extraLine({ extra: null }, en), null)
 })
+
+test("a week on an even pace is not red or yellow (Ultra's main window)", () => {
+  const cfg = M.config({ language: "en", workFrom: 8, workTo: 23 })
+  // A week that opened Monday 03:00; now Monday 08:20 with 1% used, then 11:00 with 3%.
+  const start = new Date(2026, 10, 9, 3, 0).getTime() / 1000
+  const week = { key: "weekly_all", group: "weekly", model: "", util: 1, resetsAt: start + 7 * 86400, window: 7 * 86400, rate: null }
+  const info = { id: "claude", windows: [week], ratio: 0.1 }
+  const early = M.pace(week, new Date(2026, 10, 9, 8, 20).getTime() / 1000, info, cfg)
+  assert.notEqual(early.level, "red")
+  assert.equal(early.runsOut, false)
+  const later = M.pace({ ...week, util: 3 }, new Date(2026, 10, 9, 11, 0).getTime() / 1000, info, cfg)
+  assert.equal(later.level === "red" || later.level === "yellow", false, later.status.id)
+  // Clearly ahead after two working days: that still warns.
+  const ahead = M.pace({ ...week, util: 60 }, new Date(2026, 10, 10, 20, 0).getTime() / 1000, info, cfg)
+  assert.equal(ahead.level, "red")
+})

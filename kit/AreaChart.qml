@@ -4,7 +4,8 @@ import qs.Commons
 // Recent history as lines: `series` = [{ values: [0..1], color, fill, dashed }],
 // newest value at the right edge, `capacity` points across the width. Under
 // the chart: `leftLabel` · the legend (each series' `label`) · `rightLabel`.
-// Painting happens only when something changes, so a closed popup costs nothing.
+// Painting happens only when something changes and only while `live`: bind
+// `live` to the popup being open and a closed popup paints nothing.
 Column {
   id: areaChart
 
@@ -31,9 +32,9 @@ Column {
     height: areaChart.chartHeight
     // Repaint on theme or size changes too.
     property color gridColor: areaChart.look.track
-    onGridColorChanged: requestPaint()
-    onWidthChanged: requestPaint()
-    onHeightChanged: requestPaint()
+    onGridColorChanged: if (areaChart.live) requestPaint()
+    onWidthChanged: if (areaChart.live) requestPaint()
+    onHeightChanged: if (areaChart.live) requestPaint()
 
     onPaint: {
       var ctx = getContext("2d")
@@ -48,6 +49,7 @@ Column {
       var step = w / Math.max(1, areaChart.capacity - 1)
       for (var s = 0; s < areaChart.series.length; s++) {
         var line = areaChart.series[s]
+        var tone = Qt.color(line.color)   // a colour or a name like "red"
         var vals = line.values || []
         if (vals.length < 2) continue
         var first = vals.length - 1
@@ -55,8 +57,8 @@ Column {
         function py(i) { return h - 1 - Math.max(0, Math.min(1, Number(vals[i]) || 0)) * (h - 2) }
         if (line.fill) {
           var grad = ctx.createLinearGradient(0, 0, 0, h)
-          grad.addColorStop(0, Qt.rgba(line.color.r, line.color.g, line.color.b, 0.32))
-          grad.addColorStop(1, Qt.rgba(line.color.r, line.color.g, line.color.b, 0.02))
+          grad.addColorStop(0, Qt.rgba(tone.r, tone.g, tone.b, 0.32))
+          grad.addColorStop(1, Qt.rgba(tone.r, tone.g, tone.b, 0.02))
           ctx.fillStyle = grad
           ctx.beginPath()
           ctx.moveTo(px(0), h)
@@ -65,7 +67,7 @@ Column {
           ctx.closePath()
           ctx.fill()
         }
-        ctx.strokeStyle = line.color
+        ctx.strokeStyle = tone
         ctx.lineWidth = line.dashed ? 1.5 : 2
         ctx.setLineDash(line.dashed ? [3, 3] : [])
         ctx.beginPath()

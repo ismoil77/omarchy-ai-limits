@@ -644,12 +644,14 @@ class Run(Sandbox):
     forced = self.run_with(now=NOW + 11, fetch=lambda a: self.windows_future(), force=True)
     self.assertTrue(forced["ok"])
 
-  def test_stale_numbers_count_as_current_for_five_minutes(self):
+  def test_stale_numbers_count_as_current_for_ten_minutes(self):
     self.login()
     self.run_with(fetch=lambda a: self.windows_future())
     out = self.run_with(now=NOW + 120, fetch=lambda a: (_ for _ in ()).throw(OSError("x")))
     self.assertEqual((out["ok"], out["error"]), (True, "network"))
     out = self.run_with(now=NOW + 400, fetch=lambda a: (_ for _ in ()).throw(OSError("x")))
+    self.assertEqual((out["ok"], out["error"]), (True, "network"))
+    out = self.run_with(now=NOW + 700, fetch=lambda a: (_ for _ in ()).throw(OSError("x")))
     self.assertEqual((out["ok"], out["error"]), (False, "network"))
 
   def test_a_window_that_reset_reads_zero(self):
@@ -1053,14 +1055,19 @@ class Cli(Sandbox):
   def test_flags_reach_run(self):
     for argv, want in (([], (False, False, None)), (["--force"], (True, False, None)), (["--renew"], (False, True, None)),
                        (["--force", "--renew"], (True, True, None)), (["--providers", "codex, gemini"], (False, False, ["codex", "gemini"])),
-                       (["--providers", "bogus"], (False, False, None)), (["--providers"], (False, False, None))):
+                       (["--providers", "Claude,CODEX"], (False, False, ["claude", "codex"])),
+                       # Nothing known means nothing shown, not everything.
+                       (["--providers", "bogus"], (False, False, [])), (["--providers"], (False, False, []))):
       with mock.patch.object(limit, "run", return_value={}) as run, mock.patch("sys.stdout", io.StringIO()):
         limit.main(argv)
-      run.assert_called_once_with(want[0], renew=want[1], only=want[2])
+      run.assert_called_once_with(want[0], renew=want[1], only=want[2], select=None)
 
-  def test_select_flag_writes_the_choice(self):
-    with mock.patch.object(limit, "run", return_value={}), mock.patch("sys.stdout", io.StringIO()):
-      limit.main(["--select", "codex"])
+  def test_select_flag_writes_the_choice_under_the_lock(self):
+    with mock.patch("sys.stdout", io.StringIO()):
+      limit.main(["--select", "codex", "--providers", "bogus"])
+    self.assertEqual(limit.read_selected(), "codex")
+    with mock.patch("sys.stdout", io.StringIO()):
+      limit.main(["--select", "nonsense", "--providers", "bogus"])
     self.assertEqual(limit.read_selected(), "codex")
 
   def test_prints_one_json_object(self):
@@ -1077,6 +1084,23 @@ class Cli(Sandbox):
     self.assertEqual([p["id"] for p in data["providers"]], ["claude"])
     self.assertEqual(data["providers"][0]["windows"], [])
 
+
+
+class NoRedirects(unittest.TestCase):
+  def test_a_redirect_is_refused_so_a_token_never_follows_it(self):
+    handler = limit.NoRedirect()
+    request = urllib.request.Request("https://api.anthropic.com/x", headers={"Authorization": "Bearer t"})
+    self.assertIsNone(handler.redirect_request(request, None, 302, "Found", {}, "https://evil.example/x"))
+    opener = urllib.request._opener
+    self.assertTrue(any(type(h).__name__ == "NoRedirect" for h in opener.handlers))
+
+
+class History(Sandbox):
+  def test_samples_without_the_five_hour_figure_are_skipped(self):
+    samples = [{"t": 0, "org": "o", "u": {"fh": 1, "sd": 1}}, {"t": 600000, "org": "o", "u": {"fh": 5, "sd": 2}},
+               {"t": 1200000, "org": "o", "u": {"sd": 3}}, {"t": 1800000, "org": "o", "u": {"sd": 4}}]
+    limit.CLAUDE_USAGE_HISTORY.write_text(json.dumps({"samples": samples}))
+    self.assertEqual(limit.claude_history_totals(), (4.0, 1.0))
 
 
 class Extra(unittest.TestCase):

@@ -74,7 +74,7 @@ FORCED_MIN_INTERVAL = 10
 RATE_SPAN = 30 * 60
 RATE_MIN_SPAN = 10 * 60
 # Numbers this old still count as current even if the last request failed.
-STALE_AFTER = 5 * 60
+STALE_AFTER = 10 * 60  # twice the longest fetch interval: one failed fetch does not dim the numbers
 # A window this short is paced in clock time; a longer one in active hours.
 SESSION_MAX = 6 * 3600
 # Ratio learning: start from a prior worth RATIO_PRIOR_SPAN points of 5-hour
@@ -120,6 +120,17 @@ CODEX_DIR = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
 GEMINI_DIR = Path.home() / ".gemini"
 CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "ismoil-ai-limits"
 LEGACY_CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "ismoil-claude-limit"
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+  """urllib resends the Authorization header to wherever a 30x points. The
+  tokens go to the hosts named in this file and nowhere else: a redirect is an error."""
+
+  def redirect_request(self, *args, **kwargs):
+    return None
+
+
+urllib.request.install_opener(urllib.request.build_opener(NoRedirect))
 
 
 class Failure(Exception):
@@ -603,7 +614,7 @@ def fetch_codex(state, now, renew_login):
   except OSError:
     raise Failure("unavailable")
   try:
-    rpc_request(proc, 1, "initialize", {"clientInfo": {"name": "ismoil-ai-limits", "version": "2"}})
+    rpc_request(proc, 1, "initialize", {"clientInfo": {"name": "ismoil-ai-limits", "version": "3"}})
     proc.stdin.write(json.dumps({"method": "initialized", "params": {}}) + "\n")
     proc.stdin.flush()
     account = rpc_request(proc, 2, "account/read", timeout=4)
@@ -700,6 +711,10 @@ def fetch_gemini(state, now, renew_login):
       state["plan"] = str(tier.get("name") or tier.get("id") or "") if isinstance(tier, dict) else ""
     payload = gemini_post("retrieveUserQuota", access, {"project": state.get("project") or ""})
   except urllib.error.HTTPError as e:
+    if e.code in (400, 403, 404):
+      # Another account since the project was remembered: ask again next time.
+      state.pop("project", None)
+      state.pop("plan", None)
     raise http_failure(e)
   found = gemini_windows(payload)
   if not found:
@@ -769,7 +784,9 @@ def claude_history_totals():
   try:
     samples = json.loads(CLAUDE_USAGE_HISTORY.read_text())["samples"]
     org = samples[-1]["org"]
-    series = sorted((s["t"] / 1000, float(s["u"]["fh"]), float(s["u"]["sd"])) for s in samples if s["org"] == org)
+    # Ultra has no 5-hour window: its samples carry no "fh" and cannot pair the two.
+    series = sorted((s["t"] / 1000, float(s["u"]["fh"]), float(s["u"]["sd"])) for s in samples
+                    if s.get("org") == org and isinstance(s.get("u"), dict) and "fh" in s["u"] and "sd" in s["u"])
   except Exception:
     return None
   ds = dw = 0.0
@@ -875,13 +892,15 @@ def poll_safely(pid, now, force, renew_login, shown=True):
     }
 
 
-def run(force=False, renew=False, only=None):
+def run(force=False, renew=False, only=None, select=None):
   make_cache_dir()
   now = time.time()
   with os.fdopen(os.open(CACHE_DIR / "lock", os.O_WRONLY | os.O_CREAT, 0o600), "w") as lock:
     os.fchmod(lock.fileno(), 0o600)
     fcntl.flock(lock, fcntl.LOCK_EX)
     migrate_legacy()
+    if select:
+      write_selected(select)  # under the lock: two bars may pick at once
     ids = [p for p in PROVIDERS if (only is None or p in only) and DETECTORS[p]()]
     chosen = read_selected()
     selected = chosen if chosen in ids else (ids[0] if ids else "")
@@ -891,15 +910,18 @@ def run(force=False, renew=False, only=None):
 
 
 def main(argv):
+  select = None
   if "--select" in argv:
     index = argv.index("--select")
-    write_selected(argv[index + 1] if index + 1 < len(argv) else "")
+    select = argv[index + 1] if index + 1 < len(argv) else None
   only = None
   if "--providers" in argv:
     index = argv.index("--providers")
     names = argv[index + 1] if index + 1 < len(argv) else ""
-    only = [n.strip() for n in names.split(",") if n.strip() in PROVIDERS] or None
-  print(json.dumps(run("--force" in argv, renew="--renew" in argv, only=only)))
+    # Any case; names it does not know are dropped, and nothing known means
+    # nothing shown, not everything.
+    only = [n.strip().lower() for n in names.split(",") if n.strip().lower() in PROVIDERS]
+  print(json.dumps(run("--force" in argv, renew="--renew" in argv, only=only, select=select)))
 
 
 if __name__ == "__main__":

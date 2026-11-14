@@ -16,6 +16,11 @@ Column {
     return s
   }
   readonly property real gap: 2
+  readonly property int drawn: {
+    var n = 0
+    for (var i = 0; i < segments.length; i++) if ((Number(segments[i].value) || 0) > 0) n++
+    return n
+  }
 
   spacing: Style.space(6)
 
@@ -36,7 +41,7 @@ Column {
           readonly property real share: segmentBar.total > 0 ? Math.max(0, Number(modelData.value) || 0) / segmentBar.total : 0
           visible: share > 0
           height: bars.height
-          width: Math.max(2, share * (bars.width - segmentBar.gap * (segmentBar.segments.length - 1)))
+          width: Math.max(2, share * (bars.width - segmentBar.gap * Math.max(0, segmentBar.drawn - 1)))
           radius: 3
           color: modelData.color
 

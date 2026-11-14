@@ -130,7 +130,11 @@ function pace(w, now, info, cfg) {
 
   var target = open && spanAll > 0 ? Math.max(0, Math.min(100, ceiling * spanDone / spanAll)) : 0
   var recent = open && !weekly && w.rate !== null && w.rate !== undefined
-  var average = open && spanDone >= 0.25
+  // How much of the window must have passed before its average pace means
+  // anything: a quarter hour of a 5-hour window; of a longer one, 15% of its
+  // working hours, at most one working day (1% on Monday morning is not
+  // "runs out on Wednesday"; a daily quota is judged after a couple of hours).
+  var average = open && spanDone >= (weekly ? Math.min(cfg.workDay, spanAll * 0.15) : 0.25)
   var rate = recent ? w.rate : (average ? util / spanDone : 0)
   var projected = util + rate * spanLeft
   var allowed = spanLeft > 0 ? Math.max(0, ceiling - util) / spanLeft : 0
@@ -142,7 +146,9 @@ function pace(w, now, info, cfg) {
     spanLeft: spanLeft, weekly: weekly,
     rate: rate, rateSource: recent ? "recent" : (average ? "average" : ""),
     projected: projected, allowed: allowed, hoursToFull: hoursToFull,
-    runsOut: open && util < 100 && hoursToFull < spanLeft,
+    // A long window is told in whole percents: only being clearly ahead of
+    // the even pace (more than 2 points) counts as heading for the limit.
+    runsOut: open && util < 100 && hoursToFull < spanLeft && (!weekly || util - target > 2),
     ceiling: ceiling, capped: ceiling < 100, ratio: ratio, weekShare: weekShare,
     ratioSpan: info && info.ratioSpan ? info.ratioSpan : 0,
     hasWeekly: !!overallWeekly(info),
@@ -175,7 +181,7 @@ function statusId(p) {
   if (p.runsOut) return { level: "red", id: "statusRunsOut" }
   if (p.overCeiling) return { level: "yellow", id: "statusOverShare" }
   if (p.gap > 5) return { level: "yellow", id: "statusFast" }
-  if (!p.capped && p.projected >= 85) return { level: "yellow", id: "statusNear" }
+  if (!p.capped && p.projected >= 85 && (!p.weekly || p.gap > 2)) return { level: "yellow", id: "statusNear" }
   if (p.util === 0 && p.rate === 0) return { level: "idle", id: "statusUnused" }
   return { level: "green", id: "statusOk" }
 }
@@ -277,7 +283,7 @@ function summary(w, p, now, cfg) {
   if (p.overCeiling) return t("sumOverShare")
   if (p.gap > 5) return t("sumFast")
   var pct = Math.round(Math.min(100, p.projected))
-  if (!p.capped && p.projected >= 85) return t("sumNear", { pct: pct })
+  if (!p.capped && p.projected >= 85 && (!p.weekly || p.gap > 2)) return t("sumNear", { pct: pct })
   if (p.status.level === "idle") return t("sumUnused")
   return p.rate > 0 ? t("sumOkForecast", { pct: pct }) : t("sumOk")
 }

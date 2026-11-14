@@ -4,6 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
+import "kit/I18n.js" as I18n
 import "kit" as Kit
 import "kit/Contrast.js" as Contrast
 import "Strings.js" as Strings
@@ -54,28 +55,9 @@ Panel {
     workTo: setting("workTo", 23),
     clock: setting("clock", "24-hour")
   })
-  readonly property real textScale: {
-    var v = String(setting("textSize", "Normal")).toLowerCase()
-    return v.indexOf("extra") === 0 ? 1.5 : v === "large" ? 1.25 : 1
-  }
-  readonly property bool motion: setting("animations", true) !== false
-  readonly property int fade: motion ? 400 : 0
-
-  // ---- type scale: a 13 px floor, then the user's shell font, then textSize
-  function px(base, floor) { return Math.round(Math.max(base, floor) * textScale) }
-  readonly property int fsSmall: px(Style.font.body, 13)
-  readonly property int fsText: px(Style.font.subtitle, 14)
-  readonly property int fsStrong: px(Style.font.title, 16)
-  readonly property int fsBig: px(Style.font.heading, 22)
-  readonly property int fsHero: px(Style.font.display, 26)
-  readonly property int bottomPad: Style.space(10)
-  readonly property int fsBar: Math.round(Style.font.body * Math.min(textScale, 1.2))
-
-  // ---- popup colours, held to contrast the theme does not promise
-  readonly property string popupBg: String(Color.popups.background)
-  readonly property color popupText: Qt.color(Contrast.ensure(String(Color.popups.text), popupBg, 7))
-  readonly property color popupDim: Qt.color(Contrast.ensure(Contrast.mix(String(Color.popups.text), popupBg, 0.22), popupBg, 4.5))
-  readonly property color popupLine: Qt.color(Contrast.mix(String(Color.popups.text), popupBg, 0.45))
+  readonly property int fsBar: Math.round(Style.font.body * Math.min(skin.textScale, 1.2))
+  // The meter's outline: between the text and the background.
+  readonly property color popupLine: Qt.color(Contrast.mix(String(skin.ink), skin.background, 0.45))
 
   // What limit.py last printed: every AI found on this machine.
   property var payload: ({ selected: "", providers: [] })
@@ -103,7 +85,7 @@ Panel {
   Kit.Look {
     id: skin
     textSize: String(root.setting("textSize", "Normal"))
-    animations: root.motion
+    animations: root.setting("animations", true) !== false
     fontFamily: root.fontFamily
     themeColors: themePalette.colors
   }
@@ -111,8 +93,8 @@ Panel {
   // The window the bar shows: the 5-hour one where there is one, else the first.
   readonly property var session: Model.mainWindow(info) || { key: "", group: "session", model: "", util: 0, resetsAt: null, window: 18000, rate: null }
   readonly property var sessionPace: Model.pace(session, now, info, cfg)
-  // Numbers older than three polls mean limit.py is not running at all.
-  readonly property bool outdated: info.fetchedAt > 0 && now - info.fetchedAt > Math.max(3 * pollSeconds, 3 * 120)
+  // Numbers older than three fetches of the slowest AI (5 min each) mean limit.py is not running at all.
+  readonly property bool outdated: info.fetchedAt > 0 && now - info.fetchedAt > Math.max(3 * pollSeconds, 3 * 300)
   readonly property bool stale: loaded && (!info.ok || fetchFailed || outdated)
   readonly property bool hasWindow: Model.mainWindow(info) !== null
   // The 5-hour window owns the bar, but a weekly window that is about to
@@ -140,15 +122,15 @@ Panel {
     return level === "red" ? themeColor("red", Color.urgent)
       : level === "yellow" ? themeColor("yellow", Color.accent)
       : level === "green" ? themeColor("green", Color.accent)
-      : Util.alpha(base !== undefined ? base : popupText, 0.45)
+      : Util.alpha(base !== undefined ? base : skin.ink, 0.45)
   }
 
   // The same colour, adjusted to read as text (4.5) or a graphic (3) on `bg`.
   function onPopup(color, min) {
-    return Qt.color(Contrast.ensure(String(color), popupBg, min === undefined ? 4.5 : min))
+    return Qt.color(Contrast.ensure(String(color), skin.background, min === undefined ? 4.5 : min))
   }
-  function levelText(level) { return level === "idle" ? popupDim : onPopup(levelColor(level), 4.5) }
-  function levelFill(level) { return level === "idle" ? popupLine : onPopup(levelColor(level), 3) }
+  function levelText(level) { return level === "idle" ? skin.dim : onPopup(levelColor(level), 4.5) }
+  function levelFill(level) { return level === "idle" ? root.popupLine : onPopup(levelColor(level), 3) }
 
   function themeColor(name, fallback) { return skin.themed(name, fallback) }
 
@@ -244,7 +226,7 @@ Panel {
 
   // The countdowns and pace ticks move between fetches.
   Timer {
-    interval: root.opened ? 5000 : 15000
+    interval: root.opened ? 5000 : 60000
     running: true
     repeat: true
     onTriggered: root.now = Date.now() / 1000
@@ -288,7 +270,7 @@ Panel {
         width: parent.width - x
         height: parent.height
         color: Util.alpha(meter.base, 0.28)
-        Behavior on x { NumberAnimation { duration: root.fade; easing.type: Easing.OutCubic } }
+        Behavior on x { NumberAnimation { duration: skin.fade; easing.type: Easing.OutCubic } }
       }
 
       Rectangle {
@@ -297,7 +279,7 @@ Panel {
         height: parent.height
         radius: parent.radius
         color: Util.alpha(meter.fill, 0.32)
-        Behavior on width { NumberAnimation { duration: root.fade; easing.type: Easing.OutCubic } }
+        Behavior on width { NumberAnimation { duration: skin.fade; easing.type: Easing.OutCubic } }
       }
 
       Rectangle {
@@ -305,8 +287,8 @@ Panel {
         height: parent.height
         radius: parent.radius
         color: meter.fill
-        Behavior on width { NumberAnimation { duration: root.fade; easing.type: Easing.OutCubic } }
-        Behavior on color { ColorAnimation { duration: root.motion ? 300 : 0 } }
+        Behavior on width { NumberAnimation { duration: skin.fade; easing.type: Easing.OutCubic } }
+        Behavior on color { ColorAnimation { duration: skin.motion ? 300 : 0 } }
       }
     }
 
@@ -318,7 +300,7 @@ Panel {
       radius: width / 2
       x: Math.round((parent.width - width) * meter.p.target / 100)
       color: meter.base
-      Behavior on x { NumberAnimation { duration: root.fade; easing.type: Easing.OutCubic } }
+      Behavior on x { NumberAnimation { duration: skin.fade; easing.type: Easing.OutCubic } }
     }
   }
 
@@ -363,7 +345,7 @@ Panel {
         font.family: root.fontFamily
         font.pixelSize: Math.round(root.fsBar * 1.35)
         renderType: Text.NativeRendering
-        Behavior on color { ColorAnimation { duration: root.motion ? 300 : 0 } }
+        Behavior on color { ColorAnimation { duration: skin.motion ? 300 : 0 } }
       }
 
       Meter {
@@ -379,7 +361,6 @@ Panel {
         base: root.barForeground
       }
 
-      // The shape repeats the colour for anyone who cannot tell it apart.
       Text {
         text: root.hasWindow ? Math.round(root.sessionPace.util) + "%" : "–"
         color: root.barForeground
@@ -391,7 +372,7 @@ Panel {
       }
 
       Text {
-        visible: !root.vertical
+        visible: !root.vertical && root.hasWindow
         text: Model.barTime(root.sessionPace, root.session, root.cfg)
         color: Util.alpha(root.barForeground, 0.8)
         font.family: root.fontFamily
@@ -433,342 +414,346 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Math.round(Style.space(390) * root.textScale))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight + root.bottomPad)
+    focusTarget: panel.loadedContent
+    contentWidth: panel.fittedContentWidth(Math.round(Style.space(390) * skin.textScale))
+    contentHeight: panel.fittedContentHeight(panel.loadedContentHeight + skin.bottomPad)
 
-    PanelKeyCatcher {
-      id: keyCatcher
-      anchors.fill: parent
-      onCloseRequested: root.close()
-      onTabRequested: function(direction) { root.switchPanel(direction) }
-      onTextKey: function(t) {
-        if (t === "r") root.refresh(true)
-        else if (t === "d") root.details = !root.details
-        else if (t === "l") root.step(1)
-        else if (t === "h") root.step(-1)
-        else if (t >= "1" && t <= "9" && Number(t) <= root.providers.length) root.select(root.providers[Number(t) - 1].id)
-      }
-
-      // Large text can outgrow the screen: the card scrolls instead of clipping.
-      Flickable {
-        id: scroller
+    // Built the first time the popup opens, not at shell start on every monitor.
+    content: Component {
+      PanelKeyCatcher {
+        id: keyCatcher
         anchors.fill: parent
-
-        // Reopen at the top, not where it was scrolled to last time.
-        Connections {
-          target: root
-          function onOpenedChanged() { if (root.opened) scroller.contentY = 0 }
+        implicitHeight: column.implicitHeight
+        onCloseRequested: root.close()
+        onTabRequested: function(direction) { root.switchPanel(direction) }
+        onTextKey: function(t) {
+          t = I18n.latinKey(t)
+          if (t === "r") root.refresh(true)
+          else if (t === "d") root.details = !root.details
+          else if (t === "l") root.step(1)
+          else if (t === "h") root.step(-1)
+          else if (t >= "1" && t <= "9" && Number(t) <= root.providers.length) root.select(root.providers[Number(t) - 1].id)
         }
 
-        contentWidth: width
-        contentHeight: column.implicitHeight + root.bottomPad
-        boundsBehavior: Flickable.StopAtBounds
-        clip: true
+        // Large text can outgrow the screen: the card scrolls instead of clipping.
+        Flickable {
+          id: scroller
+          anchors.fill: parent
 
-        Column {
-          id: column
-          width: parent.width
-          spacing: Style.space(12)
-
-          Kit.Header {
-            width: parent.width
-            look: skin
-            glyph: root.marks
-            name: root.info.name
-            value: root.hasWindow ? Math.round(root.sessionPace.util) + "%" : "—"
-            say: Model.headerText(root.info, root.loaded, root.stale, root.now, root.cfg)
-            sayColor: root.stale ? root.onPopup(root.themeColor("red", Color.urgent)) : skin.dim
-            chip: root.hasWindow ? Model.statusText(root.sessionPace, root.cfg) : ""
-            tone: root.levelFill(root.sessionPace.level)
-            toneText: root.levelText(root.sessionPace.level)
+          // Reopen at the top, not where it was scrolled to last time.
+          Connections {
+            target: root
+            function onOpenedChanged() { if (root.opened) scroller.contentY = 0 }
           }
 
-          // ---------- Which AI: a chip each, only when there is a choice ----------
-          Flow {
-            visible: root.providers.length > 1
+          contentWidth: width
+          contentHeight: column.implicitHeight + skin.bottomPad
+          boundsBehavior: Flickable.StopAtBounds
+          clip: true
+
+          Column {
+            id: column
             width: parent.width
-            spacing: Style.space(8)
+            spacing: Style.space(12)
 
-            Repeater {
-              model: root.providers
-
-              delegate: Kit.ActionButton {
-                id: chip
-                required property var modelData
-                readonly property var mainWindow: Model.mainWindow(modelData)
-                readonly property var mainPace: Model.pace(mainWindow || { group: "session", model: "", util: 0, resetsAt: null, window: 18000, rate: null }, root.now, modelData, root.cfg)
-                look: skin
-                compact: true
-                selected: modelData.id === root.selectedId
-                text: root.markOf(modelData.id) + " " + modelData.name + "  " + (mainWindow ? Math.round(mainPace.util) + "%" : "–")
-                onClicked: root.select(modelData.id)
-              }
-            }
-          }
-
-          // ---------- One card per window ----------
-          Repeater {
-            model: root.info.windows
-
-            delegate: Kit.Section {
-              id: card
+            Kit.Header {
+              width: parent.width
               look: skin
-              caption: Model.title(card.modelData, root.cfg)
-              hint: Math.round(card.p.util) + "%"
-              hintColor: card.tone
-              hintStrong: true
-              required property var modelData
-              required property int index
-              readonly property var p: Model.pace(modelData, root.now, root.info, root.cfg)
-              readonly property color tone: root.levelText(p.level)
-              readonly property color fillTone: root.levelFill(p.level)
-              readonly property color pillBg: Qt.color(Contrast.over(String(root.levelColor(p.level)), 0.16, root.popupBg))
-              readonly property color pillText: Qt.color(Contrast.ensure(String(root.levelColor(p.level)), String(pillBg), 4.5))
+              glyph: root.marks
+              name: root.info.name
+              value: root.hasWindow ? Math.round(root.sessionPace.util) + "%" : "—"
+              say: Model.headerText(root.info, root.loaded, root.stale, root.now, root.cfg)
+              sayColor: root.stale ? root.onPopup(root.themeColor("red", Color.urgent)) : skin.dim
+              chip: root.hasWindow ? Model.statusText(root.sessionPace, root.cfg) : ""
+              tone: root.levelFill(root.sessionPace.level)
+              toneText: root.levelText(root.sessionPace.level)
+            }
 
-              width: column.width
+            // ---------- Which AI: a chip each, only when there is a choice ----------
+            Flow {
+              visible: root.providers.length > 1
+              width: parent.width
               spacing: Style.space(8)
 
+              Repeater {
+                model: root.providers
 
-              // Status: a word and a shape as well as the colour.
-              Rectangle {
-                width: pillRow.implicitWidth + Style.space(16)
-                height: pillRow.implicitHeight + Style.space(6)
-                radius: height / 2
-                color: card.pillBg
-                border.width: 1
-                border.color: Util.alpha(card.pillText, 0.5)
-
-                Row {
-                  id: pillRow
-                  anchors.centerIn: parent
-                  spacing: Style.space(6)
-
-                  Text {
-                    text: card.p.status.glyph
-                    color: card.pillText
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fsSmall
-                    font.bold: true
-                  }
-
-                  Text {
-                    text: Model.statusText(card.p, root.cfg)
-                    color: card.pillText
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fsSmall
-                    font.bold: true
-                  }
+                delegate: Kit.ActionButton {
+                  id: chip
+                  required property var modelData
+                  readonly property var mainWindow: Model.mainWindow(modelData)
+                  readonly property var mainPace: Model.pace(mainWindow || { group: "session", model: "", util: 0, resetsAt: null, window: 18000, rate: null }, root.now, modelData, root.cfg)
+                  look: skin
+                  compact: true
+                  selected: modelData.id === root.selectedId
+                  text: root.markOf(modelData.id) + " " + modelData.name + "  " + (mainWindow ? Math.round(mainPace.util) + "%" : "–")
+                  onClicked: root.select(modelData.id)
                 }
               }
+            }
 
-              Meter {
-                width: parent.width
-                barHeight: even(Style.space(8) * root.textScale)
-                p: card.p
-                fill: card.fillTone
-                base: root.popupText
-                line: root.popupLine
-              }
+            // ---------- One card per window ----------
+            Repeater {
+              model: root.info.windows
 
-              // The verdict in one plain sentence (an idle window needs none: the pill says it).
-              Text {
-                visible: !card.p.open || card.p.level !== "idle"
-                width: parent.width
-                wrapMode: Text.WordWrap
-                text: Model.summary(card.modelData, card.p, root.now, root.cfg)
-                color: root.popupText
-                font.family: root.fontFamily
-                font.pixelSize: root.fsText
-                lineHeight: 1.15
-              }
+              delegate: Kit.Section {
+                id: card
+                look: skin
+                caption: Model.title(card.modelData, root.cfg)
+                hint: Math.round(card.p.util) + "%"
+                hintColor: card.tone
+                hintStrong: true
+                required property var modelData
+                required property int index
+                readonly property var p: Model.pace(modelData, root.now, root.info, root.cfg)
+                readonly property color tone: root.levelText(p.level)
+                readonly property color fillTone: root.levelFill(p.level)
+                readonly property color pillBg: Qt.color(Contrast.over(String(root.levelColor(p.level)), 0.16, skin.background))
+                readonly property color pillText: Qt.color(Contrast.ensure(String(root.levelColor(p.level)), String(pillBg), 4.5))
 
-              Repeater {
-                model: Model.rows(card.modelData, card.p, root.now, root.cfg).filter(function(r) {
-                  return root.details || r.key
-                })
+                width: column.width
+                spacing: Style.space(8)
 
-                // Label and value side by side when they fit, stacked when not;
-                // the value wraps rather than getting cut off.
-                delegate: Item {
-                  id: row
-                  required property var modelData
-                  width: card.width - card.padding * 2
-                  readonly property real gap: Style.space(12)
-                  // 10% slack: TextMetrics measures without tabular figures.
-                  readonly property bool side: labelWidth.width + valueWidth.width * 1.1 + gap <= width
-                  implicitHeight: side
-                    ? Math.max(rowLabel.implicitHeight, rowValue.implicitHeight)
-                    : rowLabel.implicitHeight + Style.space(2) + rowValue.implicitHeight
 
-                  TextMetrics {
-                    id: labelWidth
-                    text: modelData.label
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fsSmall
+                // Status: a word and a shape as well as the colour.
+                Rectangle {
+                  width: pillRow.implicitWidth + Style.space(16)
+                  height: pillRow.implicitHeight + Style.space(6)
+                  radius: height / 2
+                  color: card.pillBg
+                  border.width: 1
+                  border.color: Util.alpha(card.pillText, 0.5)
+
+                  Row {
+                    id: pillRow
+                    anchors.centerIn: parent
+                    spacing: Style.space(6)
+
+                    Text {
+                      text: card.p.status.glyph
+                      color: card.pillText
+                      font.family: root.fontFamily
+                      font.pixelSize: skin.small
+                      font.bold: true
+                    }
+
+                    Text {
+                      text: Model.statusText(card.p, root.cfg)
+                      color: card.pillText
+                      font.family: root.fontFamily
+                      font.pixelSize: skin.small
+                      font.bold: true
+                    }
                   }
+                }
 
-                  TextMetrics {
-                    id: valueWidth
-                    text: modelData.value
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fsText
-                    font.bold: modelData.strong
-                  }
+                Meter {
+                  width: parent.width
+                  barHeight: even(Style.space(8) * skin.textScale)
+                  p: card.p
+                  fill: card.fillTone
+                  base: skin.ink
+                  line: root.popupLine
+                }
 
-                  Text {
-                    id: rowLabel
-                    x: 0
-                    y: 0
-                    text: modelData.label
-                    color: root.popupDim
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fsSmall
-                  }
+                // The verdict in one plain sentence (an idle window needs none: the pill says it).
+                Text {
+                  visible: !card.p.open || card.p.level !== "idle"
+                  width: parent.width
+                  wrapMode: Text.WordWrap
+                  text: Model.summary(card.modelData, card.p, root.now, root.cfg)
+                  color: skin.ink
+                  font.family: root.fontFamily
+                  font.pixelSize: skin.body
+                  lineHeight: 1.15
+                }
 
-                  Text {
-                    id: rowValue
-                    width: row.side ? row.width - labelWidth.width - row.gap : row.width
-                    x: row.side ? row.width - width : 0
-                    y: row.side ? 0 : rowLabel.implicitHeight + Style.space(2)
-                    wrapMode: Text.WordWrap
-                    horizontalAlignment: row.side ? Text.AlignRight : Text.AlignLeft
-                    text: modelData.value
-                    color: modelData.strong ? card.tone : root.popupText
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fsText
-                    font.bold: modelData.strong
-                    font.features: { "tnum": 1 }
+                Repeater {
+                  model: Model.rows(card.modelData, card.p, root.now, root.cfg).filter(function(r) {
+                    return root.details || r.key
+                  })
+
+                  // Label and value side by side when they fit, stacked when not;
+                  // the value wraps rather than getting cut off.
+                  delegate: Item {
+                    id: row
+                    required property var modelData
+                    width: card.width - card.padding * 2
+                    readonly property real gap: Style.space(12)
+                    // 10% slack: TextMetrics measures without tabular figures.
+                    readonly property bool side: labelWidth.width + valueWidth.width * 1.1 + gap <= width
+                    implicitHeight: side
+                      ? Math.max(rowLabel.implicitHeight, rowValue.implicitHeight)
+                      : rowLabel.implicitHeight + Style.space(2) + rowValue.implicitHeight
+
+                    TextMetrics {
+                      id: labelWidth
+                      text: modelData.label
+                      font.family: root.fontFamily
+                      font.pixelSize: skin.small
+                    }
+
+                    TextMetrics {
+                      id: valueWidth
+                      text: modelData.value
+                      font.family: root.fontFamily
+                      font.pixelSize: skin.body
+                      font.bold: modelData.strong
+                    }
+
+                    Text {
+                      id: rowLabel
+                      x: 0
+                      y: 0
+                      text: modelData.label
+                      color: skin.dim
+                      font.family: root.fontFamily
+                      font.pixelSize: skin.small
+                    }
+
+                    Text {
+                      id: rowValue
+                      width: row.side ? row.width - labelWidth.width - row.gap : row.width
+                      x: row.side ? row.width - width : 0
+                      y: row.side ? 0 : rowLabel.implicitHeight + Style.space(2)
+                      wrapMode: Text.WordWrap
+                      horizontalAlignment: row.side ? Text.AlignRight : Text.AlignLeft
+                      text: modelData.value
+                      color: modelData.strong ? card.tone : skin.ink
+                      font.family: root.fontFamily
+                      font.pixelSize: skin.body
+                      font.bold: modelData.strong
+                      font.features: { "tnum": 1 }
+                    }
                   }
                 }
               }
             }
-          }
 
-          // ---------- Pay-as-you-go past the plan (Claude) ----------
-          Kit.Tile {
-            readonly property var line: Model.extraLine(root.info, root.cfg)
-            visible: line !== null
-            width: parent.width
-            look: skin
-            caption: line ? line.title : ""
-            value: line ? line.value : ""
-            valueColor: line && line.reached ? root.levelText("red") : skin.ink
-            fraction: line ? line.fraction : -1
-            fill: line && line.reached ? root.levelFill("red") : skin.accentFill
-            detail: line ? line.note : ""
-          }
-
-          // ---------- Legend: how to read the meter ----------
-          Column {
-            visible: root.info.windows.length > 0
-            width: parent.width
-            spacing: Style.space(8)
-
-            PanelSeparator { width: parent.width }
-
-            Flow {
+            // ---------- Pay-as-you-go past the plan (Claude) ----------
+            Kit.Tile {
+              readonly property var line: Model.extraLine(root.info, root.cfg)
+              visible: line !== null
               width: parent.width
-              spacing: Style.space(16)
+              look: skin
+              caption: line ? line.title : ""
+              value: line ? line.value : ""
+              valueColor: line && line.reached ? root.levelText("red") : skin.ink
+              fraction: line ? line.fraction : -1
+              fill: line && line.reached ? root.levelFill("red") : skin.accentFill
+              detail: line ? line.note : ""
+            }
 
-              Row {
-                spacing: Style.space(6)
-                Rectangle {
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: Math.max(3, Style.space(3)); height: Style.space(14); radius: width / 2
-                  color: root.popupText
+            // ---------- Legend: how to read the meter ----------
+            Column {
+              visible: root.info.windows.length > 0
+              width: parent.width
+              spacing: Style.space(8)
+
+              PanelSeparator { width: parent.width }
+
+              Flow {
+                width: parent.width
+                spacing: Style.space(16)
+
+                Row {
+                  spacing: Style.space(6)
+                  Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.max(3, Style.space(3)); height: Style.space(14); radius: width / 2
+                    color: skin.ink
+                  }
+                  Text {
+                    text: Strings.t(root.cfg.lang, "legendEven")
+                    color: skin.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: skin.small
+                  }
                 }
-                Text {
-                  text: Strings.t(root.cfg.lang, "legendEven")
-                  color: root.popupDim
-                  font.family: root.fontFamily
-                  font.pixelSize: root.fsSmall
+
+                Row {
+                  spacing: Style.space(6)
+                  Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(18); height: Style.space(8); radius: height / 2
+                    color: Util.alpha(root.levelFill("green"), 0.32)
+                    border.width: 1
+                    border.color: root.popupLine
+                  }
+                  Text {
+                    text: Strings.t(root.cfg.lang, "legendForecast")
+                    color: skin.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: skin.small
+                  }
+                }
+
+                Row {
+                  // The shade is the 5-hour window's ceiling: no such window, no legend for it.
+                  visible: Model.mainWindow(root.info) !== null && Model.mainWindow(root.info).group === "session"
+                  spacing: Style.space(6)
+                  Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(18); height: Style.space(8); radius: height / 2
+                    color: Util.alpha(skin.ink, 0.28)
+                    border.width: 1
+                    border.color: root.popupLine
+                  }
+                  Text {
+                    text: Strings.t(root.cfg.lang, "legendShare")
+                    color: skin.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: skin.small
+                  }
                 }
               }
 
-              Row {
-                spacing: Style.space(6)
-                Rectangle {
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: Style.space(18); height: Style.space(8); radius: height / 2
-                  color: Util.alpha(root.levelFill("green"), 0.32)
-                  border.width: 1
-                  border.color: root.popupLine
-                }
-                Text {
-                  text: Strings.t(root.cfg.lang, "legendForecast")
-                  color: root.popupDim
-                  font.family: root.fontFamily
-                  font.pixelSize: root.fsSmall
-                }
+              Text {
+                visible: root.details
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: Model.footnote(root.cfg)
+                color: skin.dim
+                font.family: root.fontFamily
+                font.pixelSize: skin.small
+                lineHeight: 1.15
               }
+            }
 
-              Row {
-                // The shade is the 5-hour window's ceiling: no such window, no legend for it.
-                visible: Model.mainWindow(root.info) !== null && Model.mainWindow(root.info).group === "session"
-                spacing: Style.space(6)
-                Rectangle {
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: Style.space(18); height: Style.space(8); radius: height / 2
-                  color: Util.alpha(root.popupText, 0.28)
-                  border.width: 1
-                  border.color: root.popupLine
-                }
-                Text {
-                  text: Strings.t(root.cfg.lang, "legendShare")
-                  color: root.popupDim
-                  font.family: root.fontFamily
-                  font.pixelSize: root.fsSmall
-                }
+            Kit.ActionRow {
+              width: parent.width
+
+              Kit.ActionButton {
+                look: skin
+                iconText: "󰑐"
+                text: Strings.t(root.cfg.lang, "refresh")
+                primary: true
+                onClicked: root.refresh(true)
               }
+              Kit.ActionButton {
+                visible: root.info.windows.length > 0
+                look: skin
+                text: Strings.t(root.cfg.lang, root.details ? "hideDetails" : "showDetails")
+                onClicked: root.details = !root.details
+              }
+            }
+
+            Kit.Signature {
+              width: parent.width
+              look: skin
+              widget: "ai limits"
+                version: root.version
             }
 
             Text {
-              visible: root.details
+              visible: root.loaded && root.info.windows.length === 0
               width: parent.width
               wrapMode: Text.WordWrap
-              text: Model.footnote(root.cfg)
-              color: root.popupDim
+              text: root.providers.length === 0 ? Strings.t(root.cfg.lang, "noProviders") : Model.noLimitsText(root.info, root.cfg)
+              color: skin.dim
               font.family: root.fontFamily
-              font.pixelSize: root.fsSmall
-              lineHeight: 1.15
+              font.pixelSize: skin.body
             }
-          }
-
-          Kit.ActionRow {
-            width: parent.width
-
-            Kit.ActionButton {
-              look: skin
-              iconText: "󰑐"
-              text: Strings.t(root.cfg.lang, "refresh")
-              primary: true
-              onClicked: root.refresh(true)
-            }
-            Kit.ActionButton {
-              visible: root.info.windows.length > 0
-              look: skin
-              text: Strings.t(root.cfg.lang, root.details ? "hideDetails" : "showDetails")
-              onClicked: root.details = !root.details
-            }
-          }
-
-          Kit.Signature {
-            width: parent.width
-            look: skin
-            widget: "ai limits"
-            extra: root.info.fetchedAt > 0 ? Strings.t(root.cfg.lang, "updated", { time: Model.when(root.info.fetchedAt, root.now, root.cfg) }) : ""
-            version: root.version
-          }
-
-          Text {
-            visible: root.loaded && root.info.windows.length === 0
-            width: parent.width
-            wrapMode: Text.WordWrap
-            text: root.providers.length === 0 ? Strings.t(root.cfg.lang, "noProviders") : Model.noLimitsText(root.info, root.cfg)
-            color: root.popupDim
-            font.family: root.fontFamily
-            font.pixelSize: root.fsText
           }
         }
       }

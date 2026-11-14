@@ -63,3 +63,14 @@ function num(lang, n, digits) {
   var s = Number(n).toFixed(digits === undefined ? 0 : digits)
   return DECIMAL_COMMA[lang] ? s.replace(".", ",") : s
 }
+
+// A key typed on a Russian layout as the Latin letter on the same key, so
+// shortcuts ("r" refresh, "s" send) work whatever layout is on. Other text
+// comes back unchanged.
+var RU_KEYS = "йцукенгшщзфывапролдячсмить"
+var EN_KEYS = "qwertyuiopasdfghjklzxcvbnm"
+function latinKey(t) {
+  var c = String(t || "")
+  var i = c.length === 1 ? RU_KEYS.indexOf(c.toLowerCase()) : -1
+  return i < 0 ? c : EN_KEYS.charAt(i)
+}
