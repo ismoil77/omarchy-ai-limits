@@ -46,13 +46,16 @@ Item {
     id: labels
     anchors.left: mark.right
     anchors.leftMargin: Style.space(12)
-    anchors.right: chipItem.visible ? chipItem.left : parent.right
-    anchors.rightMargin: chipItem.visible ? Style.space(8) : 0
+    anchors.right: parent.right
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(1)
 
+    // The chip sits beside the name and the figure only: the sentence below
+    // runs under it, the whole width.
+    readonly property real besideChip: width - (chipItem.visible ? chipItem.width + Style.space(8) : 0)
+
     Text {
-      width: parent.width
+      width: parent.besideChip
       textFormat: Text.PlainText
       text: header.name.toUpperCase()
       color: header.look.dim
@@ -65,7 +68,7 @@ Item {
 
     Text {
       visible: text !== ""
-      width: parent.width
+      width: parent.besideChip
       textFormat: Text.PlainText
       text: header.value
       color: header.look.ink
